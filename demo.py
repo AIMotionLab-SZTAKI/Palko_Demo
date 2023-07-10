@@ -1,4 +1,3 @@
-import numpy as np
 from path_planning_and_obstacle_avoidance.Scene_construction import construction
 from path_planning_and_obstacle_avoidance.Classes import Construction, Drone
 import pickle
