@@ -5,7 +5,7 @@ from path_planning_and_obstacle_avoidance.Trajectory_planning import *
 import re
 import sys
 import trio
-from trio import sleep
+from trio import sleep, sleep_until
 import json
 from scipy import interpolate
 import numpy as np
@@ -445,10 +445,9 @@ class DroneHandler:
         await sleep(TAKEOFF_TIME)  # while the takeoff is under way, block the handler
 
     async def _upload(self, arg):
-        with trio.move_on_at(self._start_deadline):
-            self.traj = arg
-            await self.send_and_ack(f"CMDSTART_upload_{self.traj}_EOF".encode())
-            await sleep(self.drone.rest_time)
+        self.traj = arg
+        await self.send_and_ack(f"CMDSTART_upload_{self.traj}_EOF".encode())
+        await sleep_until(self._start_deadline)
         await self.enqueue_command("start", traj_type)  # upload commands are always followed by a start command
 
     async def _land(self, arg):
@@ -460,10 +459,10 @@ class DroneHandler:
 
     async def _start(self, arg):
         if str(arg).lower() in ["relative", "rel", "absolute", "abs"]:  # trajectory may be absolute or relative
+            # self.drone.flight_time could be read from self.traj as well
+            await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
             print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.flight_time}")
-            with trio.move_on_after(self.drone.flight_time):  # should be able to read this from self.traj too
-                await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
-                await sleep(self.drone.flight_time)  # while the drone is traversing the trajectory, wait
+            await sleep(self.drone.flight_time)  # while the drone is traversing the trajectory, wait
             if self.landing:
                 await self.enqueue_command("land", None)
             else:
@@ -550,7 +549,7 @@ async def demo():
         for ID, handler in handlers.items():
             # each handler will continuously scan its queue for commands to be handled
             nursery.start_soon(handler.continuously_pop_que)
-        demo_start_deadline = current_time() + TAKEOFF_TIME + REST_TIME# this is when we start the first trajectories
+        demo_start_deadline = current_time() + TAKEOFF_TIME + REST_TIME # this is when we start the first trajectories
         elapsed_time.start_time = current_time()  # reset elapsed_time to 0
         for i, drone_ID in enumerate(drone_IDs):
             drone = [d for d in drones if d.cf_id == drone_ID][0]
@@ -603,7 +602,7 @@ REST_TIME = 3  # This is how much drones will hover between trajectories. Calcul
 # This is NOT how long it takes to perform takeoff. That is determined by the server and the firmware. This is how much
 # we wait after dispatching the takeoff command, before continuing. Set this to a common sense value that will obviously
 # be longer than how much time an actual takeoff takes, that way we don't try starting a trajectory while taking off.
-TAKEOFF_TIME = 3
+TAKEOFF_TIME = 2
 # this is how many bezier curves are generated for a trajectory. Directly influences how much memory it will take to
 # store the trajectory. More means more accurate trajectory but more memory
 num_of_segments = 40
