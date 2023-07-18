@@ -171,7 +171,8 @@ def select_fix_vertex_set(index_of_verex_set):
         outer_xy = 3 * inner_xy
         high_layer = 1.1
 
-        V_fix = [[-outer_xy, -outer_xy, high_layer], [-inner_xy, -outer_xy, high_layer], [-outer_xy, -inner_xy, high_layer], [outer_xy, -outer_xy, high_layer],
+        V_fix = [[-inner_xy, -outer_xy, high_layer], [outer_xy, -outer_xy, high_layer], [-outer_xy, inner_xy, high_layer], [inner_xy, -outer_xy, high_layer],
+                 [-inner_xy, outer_xy, high_layer],
                  [-outer_xy, outer_xy, high_layer], [outer_xy, inner_xy, high_layer], [inner_xy, outer_xy, high_layer], [outer_xy, outer_xy, high_layer]]
     elif index_of_verex_set == 3:
         # Shape: X_________________________

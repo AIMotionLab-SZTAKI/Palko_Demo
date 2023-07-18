@@ -72,7 +72,7 @@ def write_to_skyc(type: str):
                 Bezier_Data.append([last_time + REST_TIME, last_point, []])  # add a hover before the new segment
                 t = [x + last_time + REST_TIME for x in t]
                 # plt.plot(t, y)
-                knots = determine_knots(t, 40)[1:-1]  # here we can't have as many segments as if we sent the trajectories one by one
+                knots = determine_knots(t, 20)[1:-1]  # here we can't have as many segments as if we sent the trajectories one by one
                 xSpline = interpolate.splrep(t, x, k=degree, task=-1, t=knots)
                 ySpline = interpolate.splrep(t, y, k=degree, task=-1, t=knots)
                 zSpline = interpolate.splrep(t, z, k=degree, task=-1, t=knots)
@@ -416,7 +416,7 @@ class DroneHandler:
 
     async def _calculate(self, last: bool):
         print(f"[{elapsed_time():.3f}] {self.drone_ID}: Got calculate command. Trajectory should start in {self.drone.rest_time} sec")
-        choose_target(scene, self.drone, last)
+        choose_target(scene, self.drone, last)  # last==True will mean that the target chosen will be the home position
         self.drone.start_time = elapsed_time() + self.drone.rest_time  # required for trajectory calculation
         self._start_deadline = current_time() + self.drone.rest_time  # deadline for starting the trajectory
         other_drones = [drone for drone in drones if drone.cf_id != self.drone_ID]
@@ -463,9 +463,9 @@ class DroneHandler:
             await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
             print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.flight_time}")
             await sleep(self.drone.flight_time)  # while the drone is traversing the trajectory, wait
-            if self.landing:
+            if self.landing:  # self.landing signals that we don't need any more trajectories
                 await self.enqueue_command("land", None)
-            else:
+            else:  # if elapsed time is more than demo time, that means we should calculate the return to home
                 await self.enqueue_command("calculate", elapsed_time() > demo_time)
         else:
             print(f"Invalid trajectory type (not absolute or relative)")
@@ -512,21 +512,16 @@ class RateLimiter:
 
 async def establish_connection_with_handler(drone_id: str):
     drone_stream: trio.SocketStream = await trio.open_tcp_stream("127.0.0.1", PORT)
-    available_ids_bytes: bytes = await drone_stream.receive_some()  # which drones does are free on the server's side?
-    available_ids = available_ids_bytes.decode("utf-8").split(",")
-    if drone_id in available_ids:  # if our drone is among the free drones, try to connect to it
-        print(f"Available ids: {available_ids}, requesting id {drone_id}")
-        await drone_stream.send_all(drone_id.encode("utf-8"))
-        ack: bytes = await drone_stream.receive_some()
-        if ack.decode("utf-8").lower() == "success":  # if the connection is accepted, the server replies "success"
-            print(f"successfully created server-side handler for drone {drone_id}")
-            return drone_stream
-        else:
-            return None
+    await sleep(0.01)
+    request = f"REQ_{drone_id}"
+    print(f"Requesting handler for drone {drone_id}")
+    await drone_stream.send_all(request.encode('utf-8'))
+    acknowledgement: bytes = await drone_stream.receive_some()
+    if acknowledgement.decode('utf-8') == f"ACK_{drone_id}":
+        print(f"successfully created server-side handler for drone {drone_id}")
+        return drone_stream
     else:
-        print(f"Could not create drone handler for drone {drone_id}.")
         return None
-
 
 async def demo():
     print("Welcome to Palkovits Máté's drone demo!")
@@ -544,7 +539,7 @@ async def demo():
             handlers[drone_ID].live_demo = LIVE_DEMO
         else:
             raise NotImplementedError  # immediately stop if we couldn't reach one of the drones
-        await sleep(0.1)
+        await sleep(0.01)
     async with trio.open_nursery() as nursery:
         for ID, handler in handlers.items():
             # each handler will continuously scan its queue for commands to be handled
@@ -587,7 +582,7 @@ os.makedirs(log_folder_path)
 np.random.seed(1001)
 number_of_targets, graph = construction()
 scene = Construction()
-demo_time = 25  # sec
+demo_time = 20  # sec
 
 # SETUP DRONES
 target_zero = len(graph['graph'].nodes()) - number_of_targets
@@ -597,7 +592,7 @@ scene.free_targets = target_list
 
 NUM_OF_DRONES = len(drone_IDs)
 # Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
-LIVE_DEMO = False
+LIVE_DEMO = True
 REST_TIME = 3  # This is how much drones will hover between trajectories. Calculations are run during these rests.
 # This is NOT how long it takes to perform takeoff. That is determined by the server and the firmware. This is how much
 # we wait after dispatching the takeoff command, before continuing. Set this to a common sense value that will obviously

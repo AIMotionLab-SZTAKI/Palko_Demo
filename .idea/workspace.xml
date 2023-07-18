@@ -8,8 +8,10 @@
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/demo.py" beforeDir="false" afterPath="$PROJECT_DIR$/demo.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/base_graph.pickle" beforeDir="false" afterPath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/base_graph.pickle" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/number_of_targets.pickle" beforeDir="false" afterPath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/number_of_targets.pickle" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/obstacle_measurement.pickle" beforeDir="false" afterPath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/obstacle_measurement.pickle" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/static_obstacles.pickle" beforeDir="false" afterPath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/static_obstacles.pickle" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Scene_construction.py" beforeDir="false" afterPath="$PROJECT_DIR$/path_planning_and_obstacle_avoidance/Scene_construction.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -34,19 +36,19 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "WebServerToolWindowFactoryState": "false",
-    "last_opened_file_path": "/home/aimotion-i9/Projects/Palko_Demo_backup",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "settings.editor.selected.configurable": "PyScientificConfigurable",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;WebServerToolWindowFactoryState&quot;: &quot;false&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/home/aimotion-i9/Projects/smooth_skyc_generator&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;PyScientificConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RunManager" selected="Python.demo">
     <configuration name="Trajectory_planning" type="PythonConfigurationType" factoryName="Python" temporary="true" nameIsGenerated="true">
       <module name="Palko_Demo" />
@@ -157,7 +159,10 @@
       <workItem from="1688543954843" duration="12824000" />
       <workItem from="1688630688743" duration="17625000" />
       <workItem from="1688717179551" duration="12255000" />
-      <workItem from="1688975717476" duration="10534000" />
+      <workItem from="1688975717476" duration="12047000" />
+      <workItem from="1689078301904" duration="2321000" />
+      <workItem from="1689151702043" duration="2662000" />
+      <workItem from="1689664169757" duration="5075000" />
     </task>
     <servers />
   </component>
@@ -169,6 +174,6 @@
     <SUITE FILE_PATH="coverage/Palko_Demo$main.coverage" NAME="main Coverage Results" MODIFIED="1688638568214" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Palko_Demo$make_skyc_file.coverage" NAME="make_skyc_file Coverage Results" MODIFIED="1688630963221" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
     <SUITE FILE_PATH="coverage/Palko_Demo$stuff.coverage" NAME="stuff Coverage Results" MODIFIED="1688561146272" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
-    <SUITE FILE_PATH="coverage/Palko_Demo$demo.coverage" NAME="demo Coverage Results" MODIFIED="1688986291365" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
+    <SUITE FILE_PATH="coverage/Palko_Demo$demo.coverage" NAME="demo Coverage Results" MODIFIED="1689668059679" SOURCE_PROVIDER="com.intellij.coverage.DefaultCoverageFileProvider" RUNNER="coverage.py" COVERAGE_BY_TEST_ENABLED="true" COVERAGE_TRACING_ENABLED="false" WORKING_DIRECTORY="$PROJECT_DIR$" />
   </component>
 </project>
