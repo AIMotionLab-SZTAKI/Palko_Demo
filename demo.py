@@ -239,7 +239,15 @@ def splines_to_json(spline_path: List[Union[np.ndarray, List[np.ndarray], int]],
     t_abs = list(np.linspace(speed_profile[0][0], speed_profile[0][-1], granularity))
     t = [x - t_abs[0] for x in t_abs]
     distances = interpolate.splev(t_abs, speed_profile)
-    x, y, z = interpolate.splev(distances, spline_path)
+    x_abs, y_abs, z_abs = interpolate.splev(distances, spline_path)
+    if traj_type.lower() == 'abs' or traj_type.lower() == 'absolute':
+        x = x_abs
+        y = y_abs
+        z = z_abs
+    else:
+        x = [element - x_abs[0] for element in x_abs]
+        y = [element - y_abs[0] for element in y_abs]
+        z = [element - z_abs[0] for element in z_abs]
 
     knots = determine_knots(t, num_of_segments)[1:-1]
     # We need to give the splrep inside knots. I think [0] and [-1] should also technically be inside knots, but apparently
@@ -274,7 +282,7 @@ def splines_to_json(spline_path: List[Union[np.ndarray, List[np.ndarray], int]],
                            Bezier_Curve[-1],
                            Bezier_Curve[2:-1]]
         Data.append(curve_to_append)
-    type = "COMPRESSED"  # for now, stick to compressed trajectories (although we could use POLY4D)
+    type = "COMPRESSED"  # for now, stick to compressed trajectories (although we could use POLY4D: TODO)
     json_dict = {
         "version": 1,
         "points": Data,
@@ -293,7 +301,7 @@ def splines_to_json(spline_path: List[Union[np.ndarray, List[np.ndarray], int]],
     pickle_folder = os.path.join(sub_folder, 'pickle')
     pickle_path = os.path.join(pickle_folder, f"{traj_num}.pickle")
     with open(pickle_path, "wb") as f:
-        pickle.dump((t, x, y, z), f)
+        pickle.dump((t, x_abs, y_abs, z_abs), f)
     return json_object
 
 
@@ -559,7 +567,7 @@ async def demo():
 # This list has to be set manually to the drones we want to fly. This is inconvenient, but that's the point: it forces
 # us to manually double check if we are using the correct drones.
 drone_IDs = ["04", "06", "07", "08"]
-# drone_IDs = ["07", "06"]
+# drone_IDs = ["08", "04"]
 verify_drones(drone_IDs)  # throw an error if the drones in frame are not exactly the drones we set above
 
 # create the folders where we will store trajectory json files (for backup, logging and skyc generation)
@@ -592,7 +600,7 @@ scene.free_targets = target_list
 
 NUM_OF_DRONES = len(drone_IDs)
 # Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
-LIVE_DEMO = True
+LIVE_DEMO = False
 REST_TIME = 3  # This is how much drones will hover between trajectories. Calculations are run during these rests.
 # This is NOT how long it takes to perform takeoff. That is determined by the server and the firmware. This is how much
 # we wait after dispatching the takeoff command, before continuing. Set this to a common sense value that will obviously
@@ -608,7 +616,7 @@ granularity = 1001
 # only goes up to 5. I guess we could also use degree 1, but come on, we're professionals over here.
 degree = 3
 PORT = 6000  # The TCP port for server side communication
-traj_type = "absolute"  # trajectories may be absolute or relative. Let's stick to absolute for now (TODO)
+traj_type = "absolute"
 
 scene.home_positions = scene.free_targets[-NUM_OF_DRONES:]  # the home positions are appended to the end of the nodes
 scene.free_targets = scene.free_targets[:-NUM_OF_DRONES]  # let's not fly to the home positions, only the 'normal' nodes
