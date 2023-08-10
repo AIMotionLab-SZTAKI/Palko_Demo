@@ -3,4 +3,5 @@ trajectories
 *skyc
 .idea/
 *.pickle
+path_planning_and_obstacle_avoidance/Pickle_saves/
 
