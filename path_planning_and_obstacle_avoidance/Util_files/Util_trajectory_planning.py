@@ -6,7 +6,7 @@ from gurobipy import *
 
 from .Util_constuction import intersect, create_point_cloud
 from .Util_general import *
-
+#Comment
 
 def add_coll_matrix_to_shepres(obstacles, point_cloud, Ts, cmin, cmax, safety_distance):
     """
