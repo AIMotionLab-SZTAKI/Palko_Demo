@@ -39,22 +39,24 @@ def construction():
     static_obstacles.corners_of_safe_zone = calculate_corners(static_obstacles.enclosed_space_of_safe_zone)
 
     plot_static_obstacles(static_obstacles.corners, scene.obstacles_visibility)
-    plot_static_obstacles(static_obstacles.corners_of_safe_zone,  scene.safety_zone_visibility)
+    plot_static_obstacles(static_obstacles.corners_of_safe_zone, scene.safety_zone_visibility)
 
 # ======================================================================================================================
     # GRAPH GENERATION
     V_fix = select_fix_vertex_set(scene.fix_vertex_layout)
-    V_fix = add_vertices_above_obstacles(static_obstacles.enclosed_space_of_safe_zone, V_fix, scene.dimensions[-1])
+    V_fix = add_vertices_above_obstacles(static_obstacles.enclosed_space_of_safe_zone, V_fix, scene.dimensions[-1],
+                                         scene.howering_heigt)
 
     base_graph, base_vertices = generate_base_graph(scene.dimensions, static_obstacles,
-                                                    scene.base_minimal_vertex_distance, scene.base_vertex_number,
-                                                    scene.base_rand_seed, V_fix)
+                                                    scene.base_minimal_vertex_distance, scene.base_maximal_edge_length,
+                                                    scene.base_vertex_number, scene.base_rand_seed, V_fix)
     base_graph, base_point_cloud = create_point_cloud(base_graph, scene.point_cloud_density)
     solve_target_point_collisions(base_graph, base_point_cloud, len(V_fix), scene.general_safety_distance)
     print_graph_info(base_graph, base_point_cloud)
     if scene.generate_dense_graph:
         densed_graph = extend_base_graph(scene, static_obstacles, scene.dense_minimal_vertex_distance,
-                                         scene.dense_vertex_number, scene.dense_rand_seed, base_vertices)
+                                         scene.dense_maximal_edge_length, scene.dense_vertex_number,
+                                         scene.dense_rand_seed, base_vertices)
         densed_graph, densed_point_cloud = create_point_cloud(densed_graph, scene.point_cloud_density)
         solve_target_point_collisions(densed_graph, densed_point_cloud, len(V_fix), scene.general_safety_distance)
         print_graph_info(base_graph, base_point_cloud)
@@ -78,7 +80,7 @@ def construction():
 
     if scene.show_paths_of_dynamic_obstacles:
         for points in paths_points:
-            spline = fit_spline(points)
+            spline = fit_spline(np.array(points))
             plot_spline(spline)
 
     if scene.ask_for_new_paths:
@@ -114,16 +116,20 @@ def construction():
         "point_cloud": base_point_cloud
     }
     return len(V_fix), graph
+
+
 # ======================================================================================================================
     # SELECTIONS
 
-
-def select_fix_obstacle_set(index_of_obstacle_set):
+def select_fix_obstacle_set(index_of_obstacle_set: int) -> np.ndarray:
     """
-    :param: index_of_obstacle_set: the serial number of the choosen obstacle set
-    the position of an obstacle is the center of top of it
-    the dimensions of an obstacle is the width (x direction) and depth (y direction) of it
-    :return: the obstacle parameters (if there wewre no matching obstacle set retun an empty obstacles set)
+    There can be defined the various static obstacle layouts. To add a new layout just add a new elif statment
+    and define the ostacle layout there. The obstacles have to have their top center positions and their widths,
+    where the widths can be either unified or unique for each obstacle.
+
+    :param index_of_obstacle_set: int -> the serial number of the choosen obstacle set
+    :return: enclosed_spaces: array([[x,y,z,w_x,w_y]...[x,y,z,w_x,w_y]])
+                              -> the positions of the obstacles and their increased height and widths
     """
     if index_of_obstacle_set == 0:
         return np.array([])
@@ -140,16 +146,20 @@ def select_fix_obstacle_set(index_of_obstacle_set):
     return np.column_stack((obstacle_positions, obstacle_dimensions))
 
 
-def select_fix_vertex_set(index_of_verex_set):
+def select_fix_vertex_set(index_of_verex_set: int) -> np.ndarray:
     """
-    V_fix = [[x_0,y_0,z_0],[x_1,y_1,z_1],...[x_N,y_N,z_N]]
+    Define the target points which will be available for the drones to fly to. To add a new set of targets just
+    add a new elif statement and define a set of cordinates.
+
+    :param index_of_verex_set: int -> the selected target point set.
+    :return: array([[x,y,z]...[x,y,z]]) -> the coordinates of the targets
     """
     if index_of_verex_set == 0:
         return np.array([])
     elif index_of_verex_set == 1:
         # Shape: X_________________________
         #           03/19 02/18 01/17 00/16|
-        #           07/23 06/22 05/21 04/20|   2 layer
+        #           07/23 06/22 05/21 04/20|   2 layers
         #           11/27 10/26 09/25 08/24|
         #           15/31 14/30 13/29 12/28|
         #                                  Y

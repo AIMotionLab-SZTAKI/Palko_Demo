@@ -1,53 +1,148 @@
 from queue import PriorityQueue
+from typing import Tuple
+import networkx as nx
 from gurobipy import *
 
 from path_planning_and_obstacle_avoidance.Util_files.Util_general import *
+from path_planning_and_obstacle_avoidance.Classes import Drone
 
 
-def add_coll_matrix_to_shepres(obstacles, point_cloud, Ts, cmin, cmax, safety_distance):
+def add_coll_matrix_to_shepres(obstacles: list, point_cloud: np.ndarray, Ts: float, cmin: int, cmax: int,
+                               safety_distance: float) -> None:
     """
     Fill the collision matrix parameter of the obastacles.
     The collision matrix has the costs of the points of the graph edges in different time points.
     Handle the obstacles as floating spheres.
-    """
-    drone_r = 0.12
 
+    :param obstacles: list of dynamic obstacle objects
+    :param point_cloud: array([[x,y,z]...[x,y,z]]) -> collection of points which represents the edges of the graph
+    :param Ts: float -> sample time
+    :param cmin: int -> the minimal cost of a collision
+    :param cmax: int -> the maximal cost of a collision
+    :param safety_distance: float -> minimal distance between the obstacles and the drones
+    :return: None, but its modifies the dynamic obstacle objects
+    """
+    drone = Drone()
     for obs in obstacles:
         fligth_time = math.ceil((obs.path_length/obs.speed)*10)/10
         time_grid = np.arange(0, fligth_time + Ts, Ts)
         positions = obs.move(time_grid)
         dist_matrix = distance_matrix(positions, point_cloud) # (time x edge)
-        rel_distances = dist_matrix/(obs.radius+drone_r+2*safety_distance)
+        rel_distances = dist_matrix/(obs.radius+drone.radius+2*safety_distance)
         coll_matrix = (1 - rel_distances) * (cmax - cmin)
         coll_matrix = np.where(coll_matrix >= 0, cmin + coll_matrix, 0)
         obs.collision_matrix = np.column_stack((time_grid, coll_matrix))
 
 
-def add_coll_matrix_to_elipsoids(drones, point_cloud, Ts, cmin, cmax, safety_distance):
+def add_coll_matrix_to_elipsoids(drones: list, graph_dict: dict, Ts: float, cmin: int, cmax: int,
+                                 safety_distance: float) -> None:
     """
     Fill the collision matrix parameter of the drones.
     The collision matrix has the costs of the points of the graph edges in different time points.
     Handle the obstacles as floating elipsoids.
+
+    :param drones: list of dynamic done objects
+    :param graph_dict: graph_dict['point_cloud'] = array([[x,y,z]...[x,y,z]]) -> collection of points which represents
+                                                                                 the edges of the graph
+                       graph_dict['graph'] = nx.Graph object
+    :param Ts: float -> sample time
+    :param cmin: int -> the minimal cost of a collision
+    :param cmax: int -> the maximal cost of a collision
+    :param safety_distance: float -> minimal distance between the obstacles and the drones
+    :return: None, but modifies the drone objects
     """
+    point_cloud = graph_dict['point_cloud']
     for drone in drones:
-        time_grid = np.arange(0, drone.flight_time + Ts, Ts) + drone.start_time
+        time_grid = np.arange(0, drone.fligth_time + Ts, Ts) + drone.start_time
         positions = drone.move(time_grid)
         rel_distances = calculate_eplis_rel_dist(positions, point_cloud, drone.DOWNWASH, drone.radius, safety_distance)
         coll_matrix = (1 - rel_distances) * (cmax - cmin)
         coll_matrix = np.where(coll_matrix >= 0, cmin + coll_matrix, 0)
         drone.collision_matrix = np.column_stack((time_grid, coll_matrix))
+        collision_matrix_compressed = ([np.append(points[2][0], np.max(drone.collision_matrix[:, points[2][0] + 1:points[2][1] + 2], axis=1))
+                                        for points in graph_dict['graph'].edges.data('point_range')])
+        collision_matrix_compressed = np.transpose(collision_matrix_compressed)
+        drone.collision_matrix_compressed = np.column_stack((np.append(np.nan, time_grid), collision_matrix_compressed))
 
 
-def find_route(speeds, G, dynamic_obstacles, other_drones, start_point, target_point, start_time):
+def select_collision_matrix_time_window(moving_obstacles: list) -> Tuple[float, float]:
+    """
+    Select the time window for the collision cost matrix.
+
+    :param moving_obstacles: list of the moving obstacles objects
+    :return: time_min: the earliest time an object starts moving
+             time_max: the latest time an object stops moving
+    """
+    time_min = np.inf
+    time_max = 0
+    for moving_obstacle in moving_obstacles:
+        if moving_obstacle.collision_matrix[0][0] < time_min:
+            time_min = moving_obstacle.collision_matrix[0][0]
+        if moving_obstacle.collision_matrix[-1][0] > time_max:
+            time_max = moving_obstacle.collision_matrix[-1][0]
+
+    return time_min, time_max
+
+
+def summ_collision_matrices(other_drones: list, time_min: float, time_max: float, Ts: float) -> np.ndarray:
+    """
+    TODO
+    :param other_drones:
+    :param time_min:
+    :param time_max:
+    :param Ts:
+    :return:
+    """
+    summed_coll_matrix = np.array([])
+
+    # skip in case of the very first trajectory generation
+    if time_max == 0:
+        return summed_coll_matrix
+
+    tgrid = np.arange(round(time_min/Ts), round(time_max/Ts)+1, 1)*Ts
+    zero_M = np.zeros((len(tgrid), np.shape(other_drones[0].collision_matrix_compressed)[1]-1))
+    summed_coll_matrix = np.column_stack((tgrid, zero_M))
+    for other_drone in other_drones:
+        added_coll_matrix = other_drone.collision_matrix_compressed[1:, 1:]
+        earlier_times = round((other_drone.collision_matrix_compressed[1][0] - time_min)/Ts)
+        if earlier_times: # When the obstacle is not yet in movement
+            one_M = np.ones((earlier_times, np.shape(other_drones[0].collision_matrix_compressed)[1] - 1))
+            coll_matrix_at_start = other_drone.collision_matrix_compressed[1][1:] * one_M
+            added_coll_matrix = np.row_stack((coll_matrix_at_start, added_coll_matrix))
+        later_times = round((time_max - other_drone.collision_matrix_compressed[-1][0])/Ts)
+        if later_times: # When the obstacles finnises its movement
+            one_M = np.ones((later_times, np.shape(other_drones[0].collision_matrix_compressed)[1] - 1))
+            coll_matrix_at_end = other_drone.collision_matrix_compressed[-1][1:] * one_M # TODO: why not np.inf ?
+            added_coll_matrix = np.row_stack((added_coll_matrix, coll_matrix_at_end))
+        summed_coll_matrix[:, 1:] = summed_coll_matrix[:, 1:]+added_coll_matrix
+    summed_coll_matrix = np.row_stack((other_drones[0].collision_matrix_compressed[:][0], summed_coll_matrix))
+
+    return summed_coll_matrix
+
+
+def find_route(speeds: np.ndarray, graph: nx.Graph, dynamic_obstacles: list, other_drones: list, start_point: int,
+               target_point: int, start_time: float, coll_matrix: np.ndarray) -> Tuple[np.ndarray, float]:
     """
     Find the best route in the graph from the start point to the target point.
+
+    :param speeds: [v...v] -> possible constant speeds for the path planning
+    :param graph: nx.Graph object
+    :param dynamic_obstacles: list of dynamic obstacle objects
+    :param other_drones: list of the drone objects except the drone which trajectory is currently generated
+    :param start_point: the index of the vertex which from the drone will start its trajectory
+    :param target_point: the index of the vertex which the drone targets
+    :param start_time: float -> the time instance when the drone will start executing its trajectory
+    :param coll_matrix: #TODO
+    :return: final_route: array([start_idx...vertex_idx...target_idx]) -> series of vertices connecting the start and
+                                                                          tartget vertices
+             best_speed: float -> the speed which was used with the final_route
     """
     final_route = np.array([])
-    time_of_final_route = 1000000
-    best_speed = speeds[0]
-
+    time_of_final_route = np.inf
+    best_speed = None
     for speed in speeds:
-        route, time_of_route = A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_time, speed)
+        route, time_of_route = A_star(graph, dynamic_obstacles, other_drones, start_point, target_point, start_time,
+                                      speed, coll_matrix)
         if time_of_route < time_of_final_route:
             time_of_final_route = time_of_route
             final_route = route
@@ -56,11 +151,24 @@ def find_route(speeds, G, dynamic_obstacles, other_drones, start_point, target_p
     return final_route, best_speed
 
 
-def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_time, drone_speed):
+def A_star(graph: nx.Graph, dynamic_obstacles: list, other_drones: list, start_point: int, target_point: int,
+           start_time: float, drone_speed: float, coll_matrix: np.ndarray) -> Tuple[np.ndarray, float]:
     """
-    A modified A* algorithm, which ties to avoid the dynamic obstacles.
+     A modified A* algorithm, which tries to avoid the dynamic obstacles.
+
+    :param graph: nx.Graph object
+    :param dynamic_obstacles: list of dynamic obstacle objects
+    :param other_drones: list of the drone objects except the drone which trajectory is currently generated
+    :param start_point: the index of the vertex which from the drone will start its trajectory
+    :param target_point: the index of the vertex which the drone targets
+    :param start_time: float -> the time instance when the drone will start executing its trajectory
+    :param drone_speed: float -> used to approximate the drones possition to calculate the possible collisions
+    :param coll_matrix: #TODO
+    :return: route: array([start_idx...vertex_idx...target_idx]) -> series of vertices connecting the start and
+                                                                    tartget vertices
+             time_of_route: the time which needed for completing the route with the given constant speed
     """
-    nv = max(G.nodes) + 1
+    nv = max(graph.nodes) + 1
     visited = np.full(nv, False, dtype=bool)
     prev = np.zeros(nv)
     tt = np.full(nv, np.inf)
@@ -69,7 +177,7 @@ def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_
     cost[start_point] = 0
     pq = PriorityQueue()
     pq.put((0, start_point))
-    target_position = G.nodes.data('pos')[target_point]
+    target_position = graph.nodes.data('pos')[target_point]
 
     while not pq.empty():
         (dist, current_vertex) = pq.get()
@@ -77,24 +185,23 @@ def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_
             break
         visited[current_vertex] = True
         t = tt[current_vertex]
-        for neighbour in list(G[current_vertex].keys()):
+        for neighbour in list(graph[current_vertex].keys()):
             if visited[neighbour]:
                 continue
             # Time to reach the target in a straight line
-            neighbours_position = G.nodes.data('pos')[neighbour]
+            neighbours_position = graph.nodes.data('pos')[neighbour]
             time_to_target = np.linalg.norm(neighbours_position-target_position)/drone_speed
             # Time cost of the neighbour
-            dt = list(G[neighbour][current_vertex].values())[0] / drone_speed
+            dt = list(graph[neighbour][current_vertex].values())[0] / drone_speed
             # Collisions with dínamic obstacles while traversing the edge
             tspan = np.array([t, t + dt]) + start_time
-            edege_collisions = G[current_vertex][neighbour]['point_range']
-            cc = 0
-            cc = summ_collision_costs(dynamic_obstacles, tspan, edege_collisions, cc)
-            cc = summ_collision_costs(other_drones, tspan, edege_collisions, cc)
-            if np.any(len(G[current_vertex][neighbour]['touching_targets'])) and \
-               (not (any(start_point == G[current_vertex][neighbour]["touching_targets"]) or
-                     any(target_point == G[current_vertex][neighbour]["touching_targets"]))):
+            edege_collisions = graph[current_vertex][neighbour]['point_range']
+            if len(graph[current_vertex][neighbour]['touching_targets']) and \
+               (not (any(start_point == graph[current_vertex][neighbour]["touching_targets"]) or
+                     any(target_point == graph[current_vertex][neighbour]["touching_targets"]))):
                     cc = np.inf
+            else:
+                cc = summ_collision_costs_M(coll_matrix, tspan, edege_collisions[0])
 
             # Update route
             old_cost = cost[neighbour]
@@ -104,6 +211,16 @@ def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_
                 cost[neighbour] = new_cost
                 prev[neighbour] = current_vertex
                 tt[neighbour] = tt[current_vertex] + dt
+
+    if sum(prev) == 0:
+        sys.exit("ERROR: A*\n"
+                 "The A* did not find a suiteble route between the "
+                 f"start_point: {start_point} {graph.nodes.data('pos')[start_point]} and the "
+                 f"target_point: {target_point} {graph.nodes.data('pos')[target_point]}.\n\n"
+                 "Possible solutions:\n"
+                 "- Place further the target points\n"
+                 "- Make the graph more dense\n"
+                 "- reduce the radii of the drones and/or the safety distance (not recommended)")
 
     vk = target_point
     k = nv - 1
@@ -120,58 +237,67 @@ def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_
     return route, time_of_route
 
 
-def summ_collision_costs(obstacles, tspan, edege_collisions, cc):
-    for obs in obstacles:
-        time_zone = np.where((obs.collision_matrix[:, 0] >= (tspan[0] - 0.1)) &
-                             (obs.collision_matrix[:, 0] <= (tspan[1] + 0.1)))[0]
+def summ_collision_costs_M(coll_matrix: np.ndarray, tspan: np.ndarray, edege: int):
+    if len(coll_matrix) != 0:
+        time_zone = np.where((coll_matrix[:, 0] >= (tspan[0] - 0.1)) & (coll_matrix[:, 0] <= (tspan[1] + 0.1)))[0]
+        cc = np.sum(coll_matrix[time_zone, coll_matrix[0, :] == edege])
+    else:
+        cc = 0
 
-        if any(time_zone):
-            collision_cost = np.sum(obs.collision_matrix[time_zone, edege_collisions[0]:edege_collisions[1]+1])
-        else:
-            if tspan[1] < obs.collision_matrix[0, 0]:
-                collision_cost = np.sum(obs.collision_matrix[0, edege_collisions[0]:edege_collisions[1] + 1])
-            else:
-                collision_cost = np.sum(obs.collision_matrix[-1, edege_collisions[0]:edege_collisions[1] + 1])
-
-        # if the obstacles arrives its destination or does not start moving yet
-        if (tspan[1] >= obs.collision_matrix[-1, 0] or tspan[0] <= obs.collision_matrix[0, 0]) and collision_cost > 0:
-            cc = np.inf
-
-        cc = cc + collision_cost
     return cc
 
 
-def extend_route(route, G, LINE_BUFFER):
+def extend_route(route: np.ndarray, graph: nx.Graph, LINE_BUFFER: int) -> np.ndarray:
     """
-    Adds aditional points to the route to keep close the spline which will be fitted to it later
+    Adds aditional points to the route to keep close the fitted spline
+
+    :param route: array([start_idx...vertex_idx...target_idx]) -> series of vertices connecting the start and
+                                                                    tartget vertices
+    :param graph: nx.Graph object
+    :param LINE_BUFFER: int -> the numberof points added to each edge
+    :return: array([[x,y,z]...[x,y,z]]) -> thh coordinates of the points of the extended route
     """
     spline_points = np.array([])
     for i in range(len(route) - 1):
-        v1 = G.nodes.data('pos')[route[i]]
-        v2 = G.nodes.data('pos')[route[i+1]]
+        v1 = graph.nodes.data('pos')[route[i]]
+        v2 = graph.nodes.data('pos')[route[i+1]]
         if i == 0:
             spline_points = np.linspace(v1, v2, 2 + LINE_BUFFER)[:-1]
         else:
             spline_points = np.row_stack((spline_points, np.linspace(v1, v2, 2 + LINE_BUFFER)[:-1]))
-    spline_points = np.row_stack((spline_points, G.nodes.data('pos')[route[-1]]))
+    spline_points = np.row_stack((spline_points, graph.nodes.data('pos')[route[-1]]))
 
     return spline_points
 
 
-def optimize_speed_profile(drone, other_drones, dynamic_obstacles, spline_path, length, speed, Ts, safety_distance):
-    J_p = 5
-    J_v = 1
+def optimize_speed_profile(drone: Drone, other_drones: list, dynamic_obstacles: list, spline_path: list, length: float,
+                           speed: float, Ts: float, safety_distance: float):
+    """
+
+    :param drone: Drone object
+    :param other_drones: list of the drone objects except the drone which trajectory is currently generated
+    :param dynamic_obstacles: list of the dynamic obstacles
+    :param spline_path: A tuple, (t,c,k) containing the vector of knots, the B-spline coefficients, and the degree of
+                        the spline.
+    :param length: float -> the length of the spline
+    :param speed: float -> the constant speed wich was selected during the route searching phase
+    :param Ts: float -> sample time
+    :param safety_distance: float -> the minimum distance between the drones and the obstacles
+    :return: speed_profile: A tuple, (t,c,k) containing the vector of knots, the B-spline coefficients, and the degree
+                            of the spline. Describes the t-s function
+             flight_time: the duration of the trajetory
+    """
     flight_time_multiplier = np.array([2, 4, 8, 16])
 
     time_windows = flight_time_multiplier * (length / speed)
     for other_drone in other_drones:
-        time_windows = time_windows[time_windows > other_drone.flight_time]
+        time_windows = time_windows[time_windows > other_drone.fligth_time]
 
+    sgrid = np.linspace(0, length, math.ceil(length / (0.25 * drone.radius)))
+    drone_pos = np.transpose(interpolate.splev(sgrid, spline_path))
     for time_window in time_windows:
         H = math.ceil(time_window / Ts)
         tgrid = np.arange(0, H * Ts, Ts) + drone.start_time
-        sgrid = np.linspace(0, length, math.ceil(length / (0.25 * drone.radius)))
-        drone_pos = np.transpose(interpolate.splev(sgrid, spline_path))
         table = np.zeros((len(tgrid), 201))
         table[:, 0] = np.transpose(tgrid)
         collision_counter = 0
@@ -181,7 +307,7 @@ def optimize_speed_profile(drone, other_drones, dynamic_obstacles, spline_path, 
                                                         drone.DOWNWASH, safety_distance, table, collision_counter)
         # TODO: poles
 
-        opt_mod = run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed, J_p, J_v)
+        opt_mod = run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed)
 
         try:
             ans = opt_mod.objVal
@@ -204,8 +330,23 @@ def optimize_speed_profile(drone, other_drones, dynamic_obstacles, spline_path, 
     return speed_profile, flight_time
 
 
-def fill_table_spheres(dynamic_obstacles, drone_pos, tgrid, sgrid, drone_radius, safety_distance, table,
-                       collision_counter):
+def fill_table_spheres(dynamic_obstacles: list, drone_pos: np.ndarray, tgrid: np.ndarray, sgrid: np.ndarray,
+                       drone_radius: float, safety_distance: float, table: np.ndarray,
+                       collision_counter: int) -> Tuple[np.ndarray, int]:
+    """
+    Fills the table which contains which part of the path is occupied by the moving obstacles during the planning
+    horizon. It handles the moving obstacles as spheres.
+
+    :param dynamic_obstacles: list of the dynamic obstacles
+    :param drone_pos: array([[x,y,z]...[x,y,z]]) ->  discretised path of the drone
+    :param tgrid: array([t0...tH]) -> discretised time points
+    :param sgrid: array([s0...sN]) -> discretised path length
+    :param drone_radius: float -> the radius of the drone
+    :param safety_distance: float -> the minimum distance between the drones and the obstacles
+    :param table: NxM matrix containing the occupied parts of the path
+    :param collision_counter: the number of instances when a moving obstacle touches the path
+    :return: table, collision_counter: updated
+    """
     for obs in dynamic_obstacles:
         active = False
         obs_pos = obs.move(tgrid)
@@ -223,8 +364,24 @@ def fill_table_spheres(dynamic_obstacles, drone_pos, tgrid, sgrid, drone_radius,
     return table, collision_counter
 
 
-def fill_table_elipsoids(other_drones, drone_pos, tgrid, sgrid, drone_radius, drone_downwash, safety_distance, table,
-                         collision_counter):
+def fill_table_elipsoids(other_drones: list, drone_pos: np.ndarray, tgrid: np.ndarray, sgrid: np.ndarray,
+                         drone_radius: float, drone_downwash: float, safety_distance: float, table: np.ndarray,
+                         collision_counter: int) -> Tuple[np.ndarray, int]:
+    """
+    Fills the table which contains which part of the path is occupied by the moving obstacles during the planning
+    horizon. It handles the moving obstacles as elipsoids.
+
+    :param other_drones: list of the drone objects except the drone which trajectory is currently generated
+    :param drone_pos: array([[x,y,z]...[x,y,z]]) ->  discretised path of the drone
+    :param tgrid: array([t0...tH]) -> discretised time points
+    :param sgrid: array([s0...sN]) -> discretised path length
+    :param drone_radius: float -> the radius of the drone
+    :param drone_downwash: float -> the height of the airflow under a drone
+    :param safety_distance: float -> the minimum distance between the drones and the obstacles
+    :param table: NxM matrix containing the occupied parts of the path
+    :param collision_counter: the number of instances when a moving obstacle touches the path
+    :return: table, collision_counter: updated
+    """
     for obs in other_drones:
         active = False
         obs_pos = obs.move(tgrid)
@@ -241,7 +398,21 @@ def fill_table_elipsoids(other_drones, drone_pos, tgrid, sgrid, drone_radius, dr
     return table, collision_counter
 
 
-def run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed, J_p, J_v):
+def run_gurobi(drone: Drone, collision_counter: int, table: np.ndarray, H: int, Ts: float, length: float,
+               tgrid: np.ndarray, speed: float):
+    """
+    The optimization of the collision free speed profile.
+
+    :param drone: Drone object
+    :param collision_counter: the number of instances when a moving obstacle touches the path
+    :param table: NxM matrix containing the occupied parts of the path
+    :param H: int -> number of time points
+    :param Ts: float -> sample time
+    :param length: float -> the length of the spline
+    :param tgrid: array([t0...tH]) -> discretised time points
+    :param speed: float -> the constant speed wich was selected during the route searching phase
+    :return: opt_mod: reasult of the optimization
+    """
     opt_mod = Model(name="linear program")
     opt_mod.setParam('OutputFlag', False)
 
@@ -253,6 +424,8 @@ def run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed, J_p
 
     sBM = length + 1
     bigM = 1000
+    J_p = 5
+    J_v = 1
 
     opt_mod.addConstr(s[0] == 0.00001)  # not 0 to negate the invincible start point effect
     opt_mod.addConstr(s[len(s) - 1] == length - 0.00001)
@@ -297,7 +470,14 @@ def run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed, J_p
     return opt_mod
 
 
-def trim_trajectory(s_result, tgrid):
+def trim_trajectory(s_result: list, tgrid: np.ndarray) -> Tuple[list, np.ndarray]:
+    """
+    Remove the end of the trajectory where the drone howers in its goal position.
+
+    :param s_result: [s0...sH] -> the flight path lengths assigned to the time points
+    :param tgrid: array([t0...tH]) -> discretised time points
+    :return: s_result, tgrid: updated
+    """
     standing = np.where(np.array(s_result) == s_result[-1])
     standing = np.flip(standing)[0]
     remove = False
@@ -312,6 +492,15 @@ def trim_trajectory(s_result, tgrid):
 
 
 def choose_target(scene, drone, return_home: bool = False):
+    """
+    Assing a new target poin for the given drone.
+
+    :param scene: the free_targets contains those target points which are not start or goal ploints for either of the
+                  drones
+    :param drone: start_vertex -> the vertex which from the drone will start is trajectory
+                  goal_vertex -> the vertex which to the drone has to go
+    :return: None, but the free targets and the drone start and target pasitions are updated
+    """
     if drone.start_vertex not in scene.home_positions:
         scene.free_targets = np.append(scene.free_targets, drone.start_vertex)
     drone.start_vertex = drone.target_vetrex

@@ -437,7 +437,7 @@ class DroneHandler:
 
         self.drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
         # self.drone.flight_time = self.drone.trajectory['speed_profile'][0][-1]
-        self.drone.flight_time = duration
+        self.drone.fligth_time = duration
         add_coll_matrix_to_elipsoids([self.drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
                                      scene.general_safety_distance)
         traj_json = splines_to_json(spline_path, speed_profile, self.drone_ID, self.traj_id)
@@ -469,8 +469,8 @@ class DroneHandler:
         if str(arg).lower() in ["relative", "rel", "absolute", "abs"]:  # trajectory may be absolute or relative
             # self.drone.flight_time could be read from self.traj as well
             await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
-            print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.flight_time}")
-            await sleep(self.drone.flight_time)  # while the drone is traversing the trajectory, wait
+            print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.fligth_time}")
+            await sleep(self.drone.fligth_time)  # while the drone is traversing the trajectory, wait
             if self.landing:  # self.landing signals that we don't need any more trajectories
                 await self.enqueue_command("land", None)
             else:  # if elapsed time is more than demo time, that means we should calculate the return to home
@@ -639,7 +639,7 @@ for i, drone_ID in enumerate(drone_IDs):
                                                                        other_drones=drones, Ts=scene.Ts,
                                                                        safety_distance=scene.general_safety_distance)
     drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
-    drone.flight_time = duration
+    drone.fligth_time = duration
     add_coll_matrix_to_elipsoids([drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
                                  scene.general_safety_distance)
     drones.append(drone)  # for the next drone, this current drone will count as part of 'other_drones': avoid collision

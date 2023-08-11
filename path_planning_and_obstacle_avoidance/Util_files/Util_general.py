@@ -16,16 +16,23 @@ def pickle_load(file):
     return data
 
 
-def print_WARNING(message):
+def print_WARNING(message: str) -> None:
     """
-    make the input string yellow and print it to the console with WARNING:
+    Make the input string yellow and print it out to the console with WARNING: message
+
+    :param message: The message to be printed out to the console.
+    :return: None
     """
     print("\033[93mWARNING:", message, "\033[0m ")
 
 
-def fit_spline(points):
+def fit_spline(points: np.ndarray) -> list:
     """
     Fit a B-spline to the given 3D coordinate sequence.
+
+    :param points: [[x,y,z]...[x,y,z]]
+    :return: spline: A tuple, (t,c,k) containing the vector of knots, the B-spline coefficients, and the degree of the
+                     spline.
     """
     points = np.array(points)
     X = points[:, 0]

@@ -11,11 +11,17 @@ from path_planning_and_obstacle_avoidance.Util_files.Util_constuction import fit
 from path_planning_and_obstacle_avoidance.Util_files.Util_general import evaluate_splie
 
 
-def plot_arena(scene):
+def plot_arena(dimensions: list) -> None:
+    """
+    Set up the dimensions of the plotted fligt zone, name the axes and set the initial view angle.
+
+    :param dimensions: [x_min, x_max, y_min, y_max,z_min, z_max] -> the borders of the flight zone
+    :return: None
+    """
     ax = plt.axes(projection='3d')
-    ax.set_xlim3d(scene.dimensions[0], scene.dimensions[1])
-    ax.set_ylim3d(scene.dimensions[2], scene.dimensions[3])
-    ax.set_zlim3d(0, scene.dimensions[1] + scene.dimensions[3])
+    ax.set_xlim3d(dimensions[0], dimensions[1])
+    ax.set_ylim3d(dimensions[2], dimensions[3])
+    ax.set_zlim3d(0, dimensions[1] + dimensions[3])
     ax.set_aspect('auto', adjustable='box')
     plt.grid(True)
     ax.set_xlabel('x')
@@ -24,7 +30,15 @@ def plot_arena(scene):
     ax.view_init(elev=89.9999, azim=269.9999)
 
 
-def plot_static_obstacles(corners_of_static_obstacles, alpha):
+def plot_static_obstacles(corners_of_static_obstacles: np.ndarray, alpha: float) -> None:
+    """
+    Plot the static obstacles to the arena.
+
+    :param corners_of_static_obstacles: np.array([[c1...c8],[c1...c8]]), where c=[x,y,z]
+    :param alpha: float -> Defines the visibility of the obstacles. Use 1 for the obstacles
+                           and a lower value for the safety zones.
+    :return: None
+    """
     ax = plt.gca()
     for i in range(corners_of_static_obstacles.shape[0]):
         p1 = corners_of_static_obstacles[i][0]
@@ -83,7 +97,13 @@ def plot_graph(graph, size, color):
         ax.plot(*edge.T, color=color, linewidth=size/10)
 
 
-def ask_for_paths(dimensions):
+def ask_for_paths(dimensions: np.ndarray) -> list:
+    """
+    Ask the user for the dynamic obstacle paths.
+
+    :param dimensions: array([x_min, x_max, y_min, y_max,z_min, z_max]) -> the borders of the flight zone
+    :return: paths_points: [[p]...[p]], where p=[[x,y,z]...[x,y,z]] -> points of the paths of the obstacles
+    """
     fig = plt.gcf()  # Catch the current fig which previously created by create_view
     ax = fig.gca()
     plt.subplots_adjust(left=0.25)
@@ -210,7 +230,7 @@ def anim_drones(time, objects):
         obj.plot_stl.set_verts(obj.stl_surface + obj.position)
 
 
-def tellme(s):  # Helping function to write out instructions for the making the paths
+def tellme(s: str) -> None:  # Helping function to write out instructions for the making the paths
     plt.title(s, fontsize=16)
     plt.draw()
 

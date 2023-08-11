@@ -8,24 +8,37 @@ from path_planning_and_obstacle_avoidance.Util_files.Util_trajectory_planning im
 
 def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_distance):
 
+    # ==================================================================================================================
+    # SUMM COLLISION MATRICES
+    # TODO: time_min should not be the min of other drones but the start time of the actual drone
+    time_min, time_max = select_collision_matrix_time_window(other_drones)
+    coll_matrix_summ = summ_collision_matrices(other_drones, time_min, time_max, Ts)
+
+    # ==================================================================================================================
     # FIND ROUTE
     route, speed = find_route(drone.constant_speeds, G['graph'], dynamic_obstacles, other_drones,
-                              drone.start_vertex, drone.target_vetrex, drone.start_time)
+                              drone.start_vertex, drone.target_vetrex, drone.start_time, coll_matrix_summ)
 
+    # ==================================================================================================================
     # FIT SPLINE
     line_buffer = 5
     spline_points = extend_route(route, G['graph'], line_buffer)
     spline = fit_spline(spline_points)
     spline_path, length = parametrize_by_path_length(spline)
 
+    # ==================================================================================================================
     # DESIGN SPEED PROFILE
     speed_profile, flight_time = optimize_speed_profile(drone, other_drones, dynamic_obstacles, spline_path, length,
                                                         speed, Ts, safety_distance)
 
+    # ==================================================================================================================
     # STANDARD RETURN
     if flight_time is not None:
         return spline_path, speed_profile, flight_time, length
-    #...................................................................................................................
+
+    # ==================================================================================================================
+    # ==================================================================================================================
+    # ==================================================================================================================
     # HANDLE STANDING OBSTACLES
     print_WARNING("Finished drone/dynamic obstacle is blocking the way.")
 
@@ -36,9 +49,10 @@ def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_di
         occupied_points = np.where(obs.collision_matrix[-1, :] > 0)[0][1:]
         obs.collision_matrix[:, occupied_points] = np.inf
 
+    # ==================================================================================================================
     # FIND ROUTE
     route, speed = find_route(drone.constant_speeds, G['graph'], dynamic_obstacles, other_drones,
-                              drone.start_vertex, drone.target_vetrex, drone.start_time)
+                              drone.start_vertex, drone.target_vetrex, drone.start_time, coll_matrix_summ)
 
     # FIT SPLINE
     spline_points = extend_route(route, G['graph'], line_buffer)
@@ -95,8 +109,8 @@ if __name__ == '__main__':
                                                                               scene.general_safety_distance)
 
         drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
-        drone.flight_time = fligth_time
-        add_coll_matrix_to_elipsoids([drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
+        drone.fligth_time = fligth_time
+        add_coll_matrix_to_elipsoids([drone], graph, scene.Ts, scene.cmin, scene.cmax,
                                      scene.general_safety_distance)
         past_drones.append(drone)
 

@@ -2,17 +2,18 @@ import copy
 from scipy.spatial import Delaunay
 import networkx as nx
 import motioncapture
+from typing import Tuple
 import matplotlib.pyplot as plt
 from gurobipy import *
 
 from path_planning_and_obstacle_avoidance.Util_files.Util_general import *
-from path_planning_and_obstacle_avoidance.Classes import Dynamic_obstacle, Drone
+from path_planning_and_obstacle_avoidance.Classes import Static_obstacles, Dynamic_obstacle, Drone
+
 
 #=======================================================================================================================
 # FOR: STATIC OBSTACLES
 
-
-def get_obstacles_positions_from_optitrack(new_measurement: bool):
+def get_obstacles_positions_from_optitrack(new_measurement: bool) -> dict:
     """
     Measure the positions of the obstacles and return a dictinary as {'name':position}.
     It evaluates the mean value of "sample_size" number of measurements.
@@ -36,13 +37,13 @@ def get_obstacles_positions_from_optitrack(new_measurement: bool):
         try:
             obstacles_dict = pickle_load("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/obstacle_measurement.pickle")
         except FileNotFoundError:
-            print("\033[93mWARNING: No existing obstacle measurements available!!!\033[0m ")
-            obstacles_dict = []
+            print_WARNING("No existing obstacle measurements available!!!")
+            obstacles_dict = {}
 
     return obstacles_dict
 
 
-def get_measurement(sample_size: int):
+def get_measurement(sample_size: int) -> dict:
     """
     Connect to the Optitrack data stream and collect "sample_size" number of measurements.
 
@@ -64,7 +65,7 @@ def get_measurement(sample_size: int):
     return obstacles_dict
 
 
-def check_maximum_deviation(obstacles_dict: dict):
+def check_maximum_deviation(obstacles_dict: dict) -> None:
     """
     Check the deviation of the measurements and give a warning if it is bigger than the "maximum_measurement_deviation".
 
@@ -85,9 +86,9 @@ def check_maximum_deviation(obstacles_dict: dict):
                       "mm, which is bigger than the given "+str(PERMISSIBLE_DEVIATION) + "mm maximum!!!")
 
 
-def add_dimension_to_obstacles(obstacle_measurements: dict, obstacles_side_lengths: dict):
+def add_dimension_to_obstacles(obstacle_measurements: dict, obstacles_side_lengths: dict) -> np.ndarray:
     """
-    Since the optitrack measurements only give thetop center coordinates of the static obstacles
+    Since the optitrack measurements only give the top-center coordinates of the static obstacles
     the width of them has to be set manualy. This function sets the width of the obstacles based on their names.
 
     The width of the obstacles can be set in Classes/Construction/self.real_obstacles_side_lengths
@@ -118,25 +119,32 @@ def add_dimension_to_obstacles(obstacle_measurements: dict, obstacles_side_lengt
     return np.array(enclosed_space)
 
 
-def match_dimensions(obstacle_dimensions, obstacle_positions):
+def match_dimensions(obstacle_dimensions: np.ndarray, obstacle_positions: np.ndarray) -> np.ndarray:
     """
-    If the dimensions of the obstacle is the same for all abstacles generate an obstacle dimension set which number of
+    If the widths of the obstacles are the same for all abstacles, generate an obstacle dimension set which number of
     rows is as the obstacles positions.
+
+    :param obstacle_dimensions: np.array([[w_x, w_y]...[w_x, w_y]]) OR np.array([[w_x, w_y]]), width in x and y directions
+    :param obstacle_positions: np.array([[x, y, z]...[x, y, z]]), top center positions
+    :return: obstacle_dimensions: np.array([[w_x, w_y]...[w_x, w_y]]), width in x and y directions
     """
     if len(obstacle_dimensions) == 1 and len(obstacle_positions) > 1:
         obstacle_dimensions = obstacle_dimensions * np.ones((len(obstacle_positions), 1))
     elif 1 < len(obstacle_dimensions) != len(obstacle_positions):
         sys.exit("Not matching obstacle positions and dimensions")
+
     return obstacle_dimensions
 
 
-def calculate_corners(obstacles_params):
+def calculate_corners(enclosed_spaces: np.ndarray) -> np.ndarray:
     """
-    :param obstacles_params: positions and dimensions of the static obstacles
-    :return: corner points of the static obstacles
+    Give the coordinates of the corners of the obstacles.
+
+    :param enclosed_spaces: np.array([[x,y,z,w_x,w_y]...[x,y,z,w_x,w_y]])
+    :return: corners_of_static_obstacles: np.array([[c1...c8],[c1...c8]]), where c=[x,y,z]
     """
     corners_of_static_obstacles = []
-    for obstacle in obstacles_params:
+    for obstacle in enclosed_spaces:
         obstacle_corners = []
         for corner_x, corner_y, corner_z in zip([-1, 1, 1, -1, -1, -1, 1, 1], [-1, -1, 1, 1, 1, -1, -1, 1],
                                                 [-1, -1, -1, -1, 0, 0, 0, 0]):
@@ -146,11 +154,19 @@ def calculate_corners(obstacles_params):
     return np.array(corners_of_static_obstacles)
 
 
-def add_safety_zone_to_static_obstacles(enclosed_spaces, safety_distance):
+def add_safety_zone_to_static_obstacles(enclosed_spaces: np.ndarray, safety_distance: float) -> np.ndarray:
     """
     The size of the obstacles are enlarged by the safety zone.
     If there are no static obstacles present return with an empty array.
+
+    :param enclosed_spaces: array([[x,y,z,w_x,w_y]...[x,y,z,w_x,w_y]])
+                            -> the positions of the obstacles and their widths
+    :param safety_distance: float
+                            -> the minimal distance between the drones and the obstacles (incuding other drones)
+    :return: enclosed_space_of_safe_zone: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                                          -> the positions of the obstacles and their increased height and widths
     """
+
     if len(enclosed_spaces) == 0:
         return enclosed_spaces
 
@@ -163,21 +179,27 @@ def add_safety_zone_to_static_obstacles(enclosed_spaces, safety_distance):
 #=======================================================================================================================
 # FOR: GRAPH GENERATION
 
-def add_vertices_above_obstacles(obstacles, V_fix, z_max):
+def add_vertices_above_obstacles(enclosed_spaces: np.ndarray, V_fix: np.ndarray, z_max: float,
+                                 hover_heigth: float) -> np.ndarray:
     """
     Create vertices above the static obstacles and add them to the fix vertices.
     Vertices above the flying zone are ignored and a warning is raised.
+
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and widths
+    :param V_fix: array([[x,y,z]...[x,y,z]]) -> positoins of the manualy added vertices
+    :param z_max: float -> the top border of the flight zone
+    :param hover_heigth: float -> the hovering height above the static obstacles
+    :return: array([[x,y,z]...[x,y,z],[x,y,z]...[x,y,z]]) -> V_fix and the newly added vertices
     """
-    if len(obstacles) == 0:
+    if len(enclosed_spaces) == 0:
         return V_fix
 
-    hover_heigth = 0.2
-
-    V_above_obstacles = obstacles[:, :3] + [0, 0, hover_heigth]
+    V_above_obstacles = enclosed_spaces[:, :3] + [0, 0, hover_heigth]
     V_inside_zone = V_above_obstacles[V_above_obstacles[:, 2] < z_max]
 
     if len(V_inside_zone) != len(V_above_obstacles):
-        print("\033[93mWARNING: Some obstacles are too tall to place a vertex above them!!!\033[0m ")
+        print_WARNING("Some obstacles are too tall to place a vertex above them!!!")
 
     if len(V_fix) == 0:
         return V_inside_zone
@@ -187,51 +209,83 @@ def add_vertices_above_obstacles(obstacles, V_fix, z_max):
     return vertices
 
 
-def generate_base_graph(dimensions, static_obstacles, thres, number_of_vertices, rand_seed, V_fix):
+def generate_base_graph(dimensions: np.ndarray, static_obstacles: Static_obstacles, min_vertex_distance: float,
+                        max_edge_length: float, number_of_vertices: int, rand_seed: int,
+                        V_fix: np.ndarray) -> Tuple[nx.Graph, np.ndarray]:
     """
-    Generate a graph around the static obstacles.
+    Fill the flight zone with the searchin-graph avoiding the static obstacles.
+
+    :param dimensions: array([x_min, x_max, y_min, y_max,z_min, z_max]) -> the borders of the flight zone
+    :param static_obstacles: Static_obstacles object
+    :param min_vertex_distance: float -> The minimum distance between the vertices.
+    :param number_of_vertices: int -> The number of vertices to be scattered inside the flight zone.
+    :param rand_seed: int -> the ranom seed for placing the verices
+    :param V_fix: array([[x,y,z]...[x,y,z]]) -> coordinates of the targets
+    :returns: graph: The generated graph object.
+              vertices: The vertices of the graph. #TODO: if the densed graph is not needed any more -> do not return it
     """
     graph = nx.Graph()
     check_fix_vertices(V_fix, static_obstacles.enclosed_space_of_safe_zone)
-    vertices = generate_vertices(dimensions, static_obstacles.enclosed_space_of_safe_zone, thres, number_of_vertices,
+    vertices = generate_vertices(dimensions, static_obstacles.enclosed_space_of_safe_zone, min_vertex_distance, number_of_vertices,
                                  rand_seed, V_fix)
     graph = load_vertices_to_graph(graph, vertices)
     edges = generate_edges(graph, static_obstacles.enclosed_space_of_safe_zone,
                            static_obstacles.corners_of_safe_zone)
-    graph = load_edges_to_graph(graph, edges)
+    graph = load_edges_to_graph(graph, edges, max_edge_length)
 
     return graph, vertices
 
 
-def check_fix_vertices(V_fix, occupied_spaces):
+def check_fix_vertices(V_fix: np.ndarray, enclosed_spaces: np.ndarray) -> None:
     """
-    Check if any fix vertex is inside an obstacle, which can cause some inconvinience later.
-    Print a WARNING if needed but do not exit
+    Check if any target is inside an obstacle, which can cause some inconvinience later.
+    Print a WARNING if needed but do not exit.
+
+    :param V_fix: array([[x,y,z]...[x,y,z]]) -> coordinates of the targets
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and widths
+    :return: None
     """
-    V_fix_ = remove_vertices_in_obstacles(V_fix, occupied_spaces)
+    V_fix_ = remove_vertices_in_obstacles(V_fix, enclosed_spaces)
     if len(V_fix) != len(V_fix_):
-        print("\033[93mWARNING: Some fix vertises are inside the obstacles!!!\033[0m ")
+        print_WARNING("Some fix vertices are inside the obstacles!!!")
 
 
-def generate_vertices(dimensions, occupied_spaces, thres, number_of_vertices, rand_seed, V_fix):
+def generate_vertices(dimensions: np.ndarray, enclosed_spaces: np.ndarray, thres: float, number_of_vertices: int,
+                      rand_seed: int, V_fix: np.ndarray) -> np.ndarray:
     """
-    Generate random vertices outside from the static obstacles with a minimum distance from each other
+    Generate random vertices outside from the static obstacles with a minimum distance from each other.
+
+    :param dimensions: array([x_min, x_max, y_min, y_max,z_min, z_max]) -> the borders of the flight zone
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and widths
+    :param thres: float -> The minimum distance between the vertices.
+    :param number_of_vertices: int -> The number of vertices to be scattered inside the flight zone.
+    :param rand_seed: int -> the ranom seed for placing the verices
+    :param V_fix:  array([[x,y,z]...[x,y,z]]) -> coordinates of the targets
+    :return: vertices: array([[x,y,z]...[x,y,z]]) -> coordinates of the vertices
     """
     enclosing_vertices = generate_enclosing_mesh(dimensions)
     random_vertices = generate_random_vertices(number_of_vertices, dimensions, rand_seed)
     vertices = np.row_stack((enclosing_vertices, random_vertices, V_fix))
-    vertices = remove_redundant_vertices(V_fix, vertices, thres)
-    vertices = remove_vertices_in_obstacles(vertices, occupied_spaces)
+    vertices = remove_redundant_vertices(len(V_fix), vertices, thres)
+    for i in range(5):
+        random_vertices = generate_random_vertices(number_of_vertices, dimensions, rand_seed+i)
+        prev_vertex_number = len(vertices)
+        vertices = np.row_stack((random_vertices, vertices))
+        vertices = remove_redundant_vertices(prev_vertex_number, vertices, thres)
+    vertices = remove_vertices_in_obstacles(vertices, enclosed_spaces)
 
     return vertices
 
 
-def generate_enclosing_mesh(dimensions):
+def generate_enclosing_mesh(dimensions: np.ndarray) -> np.ndarray:
     """
     Generate a mesh like border around the flying zone.
-    Whitout it there will be undesiredly long edges at the sides of the flying zone.
-    :param dimensions: the area of the flying zones
-    :return: a 3 x n array containing the coordinates of the vertices which cover each side of the flying area
+    Without it, there will be undesiredly long edges at the sides of the flying zone.
+
+    :param dimensions: array([x_min, x_max, y_min, y_max,z_min, z_max]) -> the borders of the flight zone
+    :return: enclosing_mesh: array([[x,y,z]...[x,y,z]]) -> coordinates of the mesh vertices
     """
     x_points = np.linspace(dimensions[0], dimensions[1], math.ceil((dimensions[1]-dimensions[0])*2))
     y_points = np.linspace(dimensions[2], dimensions[3], math.ceil((dimensions[3]-dimensions[2])*2))
@@ -263,10 +317,14 @@ def generate_enclosing_mesh(dimensions):
     return enclosing_mesh
 
 
-def generate_random_vertices(number_of_vertices, dimensions, rand_seed):
+def generate_random_vertices(number_of_vertices: int, dimensions: np.ndarray, rand_seed: int) -> np.ndarray:
     """
-    Generate given number of vertices scattered randomly inside the flying zone
-    return:  number_of_vertices x 3 size array
+    Generate given number of vertices scattered randomly inside the flight zone.
+
+    :param number_of_vertices: int -> The number of vertices to be scattered inside the flight zone.
+    :param dimensions: array([x_min, x_max, y_min, y_max,z_min, z_max]) -> the borders of the flight zone
+    :param rand_seed: int -> the ranom seed for placing the verices
+    :return: random_vertices: array([[x,y,z]...[x,y,z]]) -> coordinates of the randomly placed vertices
     """
     DIMENSION = 3
     np.random.seed(rand_seed)
@@ -277,12 +335,17 @@ def generate_random_vertices(number_of_vertices, dimensions, rand_seed):
     return random_vertices
 
 
-def remove_redundant_vertices(V_fix, vertices, thres):
+def remove_redundant_vertices(number_of_fix_vertices: int, vertices: np.ndarray, thres: float) -> np.ndarray:
     """
-    remove vertices wich are closer to other vertices than the threshold value
-    the fix vertices will be not removed
+    Remove vertices which are closer to other vertices than the threshold value. The fix vertices (targets) will be not
+     removed.
+
+    :param number_of_fix_vertices: int -> the number of vertices that should not be deleted
+    :param vertices: array([[x,y,z]...[x,y,z]]) -> coordinates of all vertices (including targets)
+    :param thres: float -> The minimum distance between the vertices
+    :return: vertices: The remaining vertices with the desired minimum distace from each other.
     """
-    number_of_fix_vertices = len(V_fix)
+
     removal = []
     for i in range(len(vertices) - number_of_fix_vertices - 1):  # Removing vertices that are too close
         if min(np.linalg.norm(vertices[i, :] - vertices[i + 1:, :], axis=1)) < thres:
@@ -292,11 +355,16 @@ def remove_redundant_vertices(V_fix, vertices, thres):
     return vertices
 
 
-def remove_vertices_in_obstacles(vertices, occupied_spaces):
+def remove_vertices_in_obstacles(vertices: np.ndarray, enclosed_spaces: np.ndarray) -> np.ndarray:
     """
-    Remove the vertices that are inside any static obstacle
+    Remove the vertices that are inside any static obstacle.
+
+    :param vertices:  array([[x,y,z]...[x,y,z]]) -> the coordinates of the vertices
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and width
+    :return: vertices: The input vertices without the ones in the obstacles.
     """
-    for occupied_space in occupied_spaces:
+    for occupied_space in enclosed_spaces:
         # Sides of obstacle
         front_side = occupied_space[0] + occupied_space[3]
         back_side = occupied_space[0] - occupied_space[3]
@@ -320,9 +388,13 @@ def remove_vertices_in_obstacles(vertices, occupied_spaces):
     return vertices
 
 
-def load_vertices_to_graph(graph, vertices):
+def load_vertices_to_graph(graph: nx.Graph, vertices: np.ndarray) -> nx.Graph:
     """
-    Add the vertices to the nx.Graph object, with their index and positions
+    Add the vertices to the nx.Graph object, with their index and positions.
+
+    :param graph: nx.Graph object (empty)
+    :param vertices: array([[x,y,z]...[x,y,z]]) -> the coordinates of the vertices
+    :return: graph: nx.Graph object (with nodes)
     """
     index_start = len(graph) # needed for addind nodes to already exsting graph
     for i, position in enumerate(vertices):
@@ -331,14 +403,22 @@ def load_vertices_to_graph(graph, vertices):
     return graph
 
 
-def generate_edges(graph, occupied_spaces, corners):
+def generate_edges(graph: nx.Graph, enclosed_spaces: np.ndarray, corners_of_static_obstacles: np.ndarray) -> list:
     """
     Generate edges with delanuay triangulation and remove those which intersect any static obstacles.
-    It gives back an adjacenci matrix wich is processeed by tho load_edges function
+    It gives back an adjacenci matrix wich is processeed by tho load_edges function.
+
+    :param graph: nx.Graph object containing the vertices and their coordinates
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and width
+    :param corners_of_static_obstacles: np.array([[c1...c8],[c1...c8]]), where c=[x,y,z]
+    :return: graph_adj: [[neighbours of v_0]...[neighbours of v_N]] -> Lists of neighbours of the verteices which indices
+                                                                       are the same as the indices of the lists
     """
+
     vertices = np.array(list(nx.get_node_attributes(graph, 'pos').values()))
     tri = Delaunay(vertices)  # Delaunay triangulation of a set of points
-    # Del_tri:[A,B,C],[A,B,D] -> Adj_graph:A[B,C,D],B[A,C,D],C[A,B],D[A,B]
+    # tri:[A,B,C],[A,B,D] -> Adj_graph:A[B,C,D],B[A,C,D],C[A,B],D[A,B]
     graph_adj = [list() for _ in range(len(vertices))]
     for simplex in tri.simplices:
         for j in range(4):
@@ -346,15 +426,18 @@ def generate_edges(graph, occupied_spaces, corners):
             graph_adj[a].extend(simplex)
             graph_adj[a].remove(a)
             graph_adj[a] = remove_duplicates(graph_adj[a])
-            graph_adj[a] = [e for e in graph_adj[a] if not intersect(vertices[a], vertices[e], occupied_spaces,
-                                                                     corners)]
+            graph_adj[a] = [e for e in graph_adj[a] if not intersect(vertices[a], vertices[e], enclosed_spaces,
+                                                                     corners_of_static_obstacles)]
 
     return graph_adj
 
 
-def remove_duplicates(duplist):
+def remove_duplicates(duplist: list) -> list:
     """
-    Ensure that the adjacency matrix contains the vertices only once
+    Ensures that the adjacency matrix contains the vertices only once
+
+    :param duplist: list of indeces with possible repetition
+    :return: noduplist: list of unique indeces
     """
     noduplist = []
     for i in duplist:
@@ -363,9 +446,17 @@ def remove_duplicates(duplist):
     return noduplist
 
 
-def intersect(v1, v2, occupied_spaces, corners):
+def intersect(v1: np.ndarray, v2: np.ndarray, enclosed_spaces: np.ndarray,
+              corners_of_static_obstacles: np.ndarray) -> bool:
     """
-    Check if an edge is intersecting a static obstacle or not
+    Check if an edge is intersecting a static obstacle or not.
+
+    :param v1: array([x,y,z]) coordinates of a vertex
+    :param v2: array([x,y,z]) coordinates of a vertex
+    :param enclosed_spaces: array([[x,y,Z,W_x,W_y]...[x,y,Z,W_x,W_y]])
+                            -> the positions of the obstacles and their increased height and width
+    :param corners_of_static_obstacles: np.array([[c1...c8],[c1...c8]]), where c=[x,y,z]
+    :return: True if the edg intersect with an obstacle, False otherwise.
     """
     xmin = min(v1[0], v2[0])
     xmax = max(v1[0], v2[0])
@@ -373,7 +464,7 @@ def intersect(v1, v2, occupied_spaces, corners):
     ymax = max(v1[1], v2[1])
     zmin = min(v1[2], v2[2])
 
-    for i, occupied_space in enumerate(occupied_spaces):
+    for i, occupied_space in enumerate(enclosed_spaces):
         front_side = occupied_space[0] + occupied_space[3]
         back_side = occupied_space[0] - occupied_space[3]
         rigth_side = occupied_space[1] + occupied_space[4]
@@ -383,15 +474,15 @@ def intersect(v1, v2, occupied_spaces, corners):
         if xmax < back_side or xmin > front_side or ymax < left_side or ymin > rigth_side or zmin > top:
             continue
 
-        a1, b1 = equation_plane(corners[i][0], corners[i][1], corners[i][2])
-        a2, b2 = equation_plane(corners[i][4], corners[i][6], corners[i][5])
-        a3, b3 = equation_plane(corners[i][0], corners[i][4], corners[i][5])
-        a4, b4 = equation_plane(corners[i][0], corners[i][5], corners[i][6])
-        a5, b5 = equation_plane(corners[i][2], corners[i][7], corners[i][4])
-        a6, b6 = equation_plane(corners[i][7], corners[i][1], corners[i][6])
+        a1, b1 = equation_plane(corners_of_static_obstacles[i][0], corners_of_static_obstacles[i][1], corners_of_static_obstacles[i][2])
+        a2, b2 = equation_plane(corners_of_static_obstacles[i][4], corners_of_static_obstacles[i][6], corners_of_static_obstacles[i][5])
+        a3, b3 = equation_plane(corners_of_static_obstacles[i][0], corners_of_static_obstacles[i][4], corners_of_static_obstacles[i][5])
+        a4, b4 = equation_plane(corners_of_static_obstacles[i][0], corners_of_static_obstacles[i][5], corners_of_static_obstacles[i][6])
+        a5, b5 = equation_plane(corners_of_static_obstacles[i][2], corners_of_static_obstacles[i][7], corners_of_static_obstacles[i][4])
+        a6, b6 = equation_plane(corners_of_static_obstacles[i][7], corners_of_static_obstacles[i][1], corners_of_static_obstacles[i][6])
 
-        dist = multiDimenDist(v1, v2)
-        q = findVec(v1, v2, True)
+        dist = np.linalg.norm(v1-v2)
+        q = (v2-v1)/dist
 
         opt_mod = Model("intersection")
         opt_mod.setParam('OutputFlag', False)
@@ -427,59 +518,38 @@ def equation_plane(p1, p2, p3):
     return a, b
 
 
-def multiDimenDist(point1, point2):
-    # find the difference between the two points, it's really the same as below
-    deltaVals = [point2[dimension] - point1[dimension] for dimension in range(len(point1))]
-    runningSquared = 0
-    # because the pythagarom theorm works for any dimension we can just use that
-    for coOrd in deltaVals:
-        runningSquared += coOrd ** 2
-    return runningSquared ** (1 / 2)
-
-
-def findVec(point1, point2, unitSphere):
-    # unitSphere to True will make the vector scaled down to a sphere with a radius one, instead of it's orginal length
-    finalVector = [0 for coOrd in point1]
-    for dimension, coOrd in enumerate(point1):
-        # finding total differnce for that co-ordinate(x,y,z...)
-        deltaCoOrd = point2[dimension] - coOrd
-        # adding total difference
-        finalVector[dimension] = deltaCoOrd
-    if unitSphere:
-        totalDist = multiDimenDist(point1, point2)
-        unitVector = []
-        for dimen in finalVector:
-            unitVector.append(dimen / totalDist)
-        return unitVector
-    else:
-        return finalVector
-
-
-def load_edges_to_graph(graph, edges):
+def load_edges_to_graph(graph: nx.Graph, edges: list, max_edge_length: float) -> nx.Graph:
     """
     Load the edges to the nx.Graph object with the edge lengths as weights
+
+    :param graph: nx.Graph object without edges
+    :param edges: [[neighbours of v_0]...[neighbours of v_N]] -> adjacency list
+    :return: graph: nx.Graph object with edges
     """
     for vertex, neighbours in enumerate(edges):
         for neighbour in neighbours:
-            graph.add_edge(vertex, neighbour, weight=np.linalg.norm(graph.nodes.data('pos')[vertex] -
-                                                                    graph.nodes.data('pos')[neighbour]))
+            length = np.linalg.norm(graph.nodes.data('pos')[vertex] - graph.nodes.data('pos')[neighbour])
+            if length < max_edge_length:
+                graph.add_edge(vertex, neighbour, weight=length)
 
     return graph
 
 
-def extend_base_graph(scene, static_obstacles, thres, number_of_vertices, rand_seed, base_vertices):
+def extend_base_graph(scene, static_obstacles, min_vertex_distance, max_edge_length: float, number_of_vertices,
+                      rand_seed, base_vertices):
     """
     Generate a graph with more vertices and edges based on the input graph.
     """
     graph = nx.Graph()
     graph = copy_vertices(scene.base_graph, graph)
     graph = dense_base_edges(scene.base_graph, graph)
-    vertices_all, vertices_extra = generate_vertices_dense(scene, static_obstacles.enclosed_space_of_safe_zone, thres,
-                                                           number_of_vertices, rand_seed, base_vertices)
+    vertices_all, vertices_extra = generate_vertices_dense(scene, static_obstacles.enclosed_space_of_safe_zone,
+                                                           min_vertex_distance, number_of_vertices, rand_seed,
+                                                           base_vertices)
     graph = load_vertices_to_graph(graph, vertices_extra)
     edges = generate_edges(graph, static_obstacles.enclosed_space_of_safe_zone,
                            static_obstacles.corners_of_safe_zone)
-    graph = load_edges_to_graph(graph, edges)
+    graph = load_edges_to_graph(graph, edges, max_edge_length)
 
     return graph
 
@@ -545,7 +615,17 @@ def generate_vertices_dense(scene, occupied_spaces, thres, number_of_vertices, r
     return vertices, vertices[:-len(V_fix)]
 
 
-def create_point_cloud(graph, density):
+def create_point_cloud(graph: nx.Graph, density: float) -> Tuple[nx.Graph, np.ndarray]:
+    """
+    Divides the edges into individual points and stores them in a point cloud, while adding a new attribute to the
+    edges of the graph that shows which rows of the point_cloud correspond to the edge.
+
+    :param graph: nx.Graph object
+    :param density: The approximate distance between the points that will be created along the edges of the graph
+    :return: graph: nx.Graph object, where the edges get an artibute that shows which rows of the point_cloud correspond
+                    to the edge
+             point_cloud: array([[x,y,z]...[x,y,z]]) -> collection of points which represents the edges of the graph
+    """
     first_iteration = True
     point_cloud = None
     for edge in list(graph.edges):
@@ -564,11 +644,19 @@ def create_point_cloud(graph, density):
     return graph, point_cloud
 
 
-def solve_target_point_collisions(graph, point_cloud, number_of_targets, safety_distance):
+def solve_target_point_collisions(graph: nx.Graph, point_cloud: np.ndarray, number_of_targets: int,
+                                  safety_distance: float) -> None:
     """
-    Add the index of the target vertices to the edges which are in the corresponding taget zone
+    Check wich edges could be in collision with the drones in their target positions and mark them.
+    This function adds a new atribute to the edges that contains the indeces of targetpoints where the edges are in
+    collision with the drones.
+
+    :param graph: nx.Graph object
+    :param point_cloud: array([[x,y,z]...[x,y,z]]) -> collection of points which represents the edges of the graph
+    :param number_of_targets: int
+    :param safety_distance: float
+    :return: None, but it modifies the graph
     """
-    ax = plt.gca()
     example_drone = Drone()
     radius = example_drone.radius
     downwash = example_drone.DOWNWASH
@@ -580,26 +668,31 @@ def solve_target_point_collisions(graph, point_cloud, number_of_targets, safety_
         edge[2]['touching_targets'] = touching_targets + (len(graph.nodes())-number_of_targets)
 
 
-def print_graph_info(G, point_cloud):
+def print_graph_info(graph: nx.Graph, point_cloud: np.ndarray) -> None:
+    """
+    Print usefull data about the graph and its point cloud.
+
+    :param graph: nx.Graph object
+    :param point_cloud: array([[x,y,z]...[x,y,z]]) -> collection of points which represents the edges of the graph
+    :return: None
+    """
     print("Number of points:", len(point_cloud))
-    print("Number of vertices:", len(G.nodes))
-    print("Nuber of edges:", len(G.edges))
+    print("Number of vertices:", len(graph.nodes))
+    print("Nuber of edges:", len(graph.edges))
     sum_L = 0
     max_L = 0
-    for edge in G.edges.data():
+    for edge in graph.edges.data():
         sum_L = sum_L + edge[2]['weight']
         if max_L < edge[2]['weight']:
             max_L = edge[2]['weight']
-    print("Average edge length:", sum_L/len(G.edges), "m")
+    print("Average edge length:", sum_L/len(graph.edges), "m")
     print("Longest edge is: ", max_L, "m")
-
-
 
 
 #=======================================================================================================================
 # FOR: DYNAMIC OBSTACLES
 
-def load_paths():
+def load_paths() -> list:
     """
     Try to load in previously generated moving obstacles paths
     """
@@ -610,7 +703,19 @@ def load_paths():
         return []
 
 
-def generate_dynamic_obstacles(paths_points, individual_speeds, default_speed, individual_radii, default_radius, desired_paths):
+def generate_dynamic_obstacles(paths_points: list, individual_speeds: np.ndarray, default_speed: float,
+                               individual_radii: np.ndarray, default_radius: float, desired_paths: np.ndarray) -> list:
+    """
+    Generate the dynamic obstacles.
+
+    :param paths_points: [[p]...[p]], where p=[[x,y,z]...[x,y,z]] -> points of the paths of the obstacles
+    :param individual_speeds: array([obstacle_idx, speed]...[idx, speed]) -> define the speed of the obstacles
+    :param default_speed: float -> if an obstacle does not have a speed assigned to it use this
+    :param individual_radii: array([obstacle_idx, radius]...[idx, radius]) -> define the radius of the obstacles
+    :param default_radius: float -> if an obstacle does not have a radius assigned to it use this
+    :param desired_paths: array([path_idx, path_idx, path_idx]) -> define the paths of the obstacles
+    :return: dynamic_obstacles: list containing the generated dynamic_obstacle objects
+    """
     dynamic_obstacles = []
     ID = 0
     for i, points in enumerate(paths_points):

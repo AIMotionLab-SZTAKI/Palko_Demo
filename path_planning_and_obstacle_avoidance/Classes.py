@@ -29,6 +29,8 @@ class Construction:
         self.real_obstacles_side_lengths = {"buildings": 0.3,
                                             "landing_pads": 0.2,
                                             "poles": 0.1}
+        # The distance from the top of the osstacles, where targetponts will be placed
+        self.howering_heigt = 0.2
 
         #...............................................................................................................
         # DYNAMIC OBSTACLE RELATED PARAMETERS:
@@ -58,7 +60,7 @@ class Construction:
         # Select a predefined layout for the manualy added vertices.
         # (0 or not defined layout number results in an empty space)
         # More layouts can be defined in the Scene_constuction.py.
-        self.fix_vertex_layout = 2
+        self.fix_vertex_layout = 0
         # The maximum distance between the points in the point cloud of a graph.
         self.point_cloud_density = 0.05
         # The generation of the densed graph can be switched off to reduce the run time of Scene_construction
@@ -67,11 +69,13 @@ class Construction:
         self.base_rand_seed = 444
         self.dense_rand_seed = 445
         # Set the number of vertices
-        self.base_vertex_number = 1000
+        self.base_vertex_number = 100
         self.dense_vertex_number = 500
         # Minimal distance between the vertices
-        self.base_minimal_vertex_distance = 0.01
+        self.base_minimal_vertex_distance = 0.25
+        self.base_maximal_edge_length = 1.0
         self.dense_minimal_vertex_distance = 0.5
+        self.dense_maximal_edge_length = 1.0
 
         #...............................................................................................................
         # PLOT RELATED PARAMETERS:
@@ -104,10 +108,10 @@ class Static_obstacles:
     Set new layouts in Scene construction
     """
     def __init__(self):
-        self.corners = [] # Set in the Scene_construction
-        self.corners_of_safe_zone = [] # Set in the Scene_construction
-        self.enclosed_space = [] # Set in the Scene_construction
-        self.enclosed_space_of_safe_zone = [] # Set in the Scene_construction
+        self.corners = np.array([]) # Set in the Scene_construction
+        self.corners_of_safe_zone = np.array([]) # Set in the Scene_construction
+        self.enclosed_space = np.array([]) # Set in the Scene_construction
+        self.enclosed_space_of_safe_zone = np.array([]) # Set in the Scene_construction
 
 
 class Dynamic_obstacle:
@@ -121,6 +125,7 @@ class Dynamic_obstacle:
         self.path_time = path_length/speed
         self.radius = radius
         self.collision_matrix = None
+        self.collision_matrix_compressed = None
         self.surface = None
         self.position = None
         self.plot_face = None
@@ -154,18 +159,18 @@ class Drone:
         self.start_vertex = None
         self.target_vetrex = None
         self.trajectory = None
-        self.flight_time = 0
+        self.fligth_time = 0
         self.surface = None
         self.position = None
         self.plot_face = None
         self.stl_surface = None
         self.plot_stl = None
         self.collision_matrix = None
+        self.collision_matrix_compressed = None
 
-    def move(self, t):
+    def move(self, t: np.ndarray) -> np.ndarray:
         t = np.where(t > self.start_time, t, self.start_time)
-        t = np.where(t < self.start_time + self.flight_time, t, self.start_time + self.flight_time)
+        t = np.where(t < self.start_time + self.fligth_time, t, self.start_time + self.fligth_time)
         s = interpolate.splev(t, self.trajectory['speed_profile'])
         position = interpolate.splev(s, self.trajectory['spline_path'])
         return np.transpose(position)
-

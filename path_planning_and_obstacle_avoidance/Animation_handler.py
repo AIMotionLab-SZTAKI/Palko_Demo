@@ -10,6 +10,7 @@ from path_planning_and_obstacle_avoidance.Classes import Construction, Drone
 if __name__ == '__main__':
     t0 = time.time()
 
+    # ==================================================================================================================
     # LOAD CONSTRUCTION
     scene = Construction()
     static_obstacles = pickle_load("Pickle_saves/Construction_saves/static_obstacles.pickle")
@@ -17,20 +18,24 @@ if __name__ == '__main__':
     number_of_targets = pickle_load("Pickle_saves/Construction_saves/number_of_targets.pickle")
     graph = pickle_load("Pickle_saves/Construction_saves/base_graph.pickle")
 
+    # ==================================================================================================================
     # INIT PLOT
-    plot_arena(scene)
+    plot_arena(scene.dimensions)
     fig = plt.gcf()
     ax = fig.gca()
     demo_time = 20 # sec
 
+    # ==================================================================================================================
     # PLACE STATIC OBSTACLES
     plot_static_obstacles(static_obstacles.corners, scene.obstacles_visibility)
 
+    # ==================================================================================================================
     # PLACE DYNAMIC OBJECTS
     place_spheres(ax, dynamic_obstacles, scene.resoulution_of_obstacles, scene.obstacles_visibility, 'grey')
     add_coll_matrix_to_shepres(dynamic_obstacles, graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
                                scene.general_safety_distance)
 
+    # ==================================================================================================================
     # SETUP DRONES
     target_zero = len(graph['graph'].nodes()) - number_of_targets
     target_list = np.arange(target_zero, len(graph['graph'].nodes()), 1)
@@ -54,9 +59,9 @@ if __name__ == '__main__':
                                                                               drones, scene.Ts,
                                                                               scene.general_safety_distance)
         drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
-        drone.flight_time = fligth_time
+        drone.fligth_time = fligth_time
 
-        add_coll_matrix_to_elipsoids([drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
+        add_coll_matrix_to_elipsoids([drone], graph, scene.Ts, scene.cmin, scene.cmax,
                                      scene.general_safety_distance)
         drones.append(drone)
         end_of_trajectories.append(fligth_time)
@@ -73,12 +78,13 @@ if __name__ == '__main__':
     time_init = time.time()
     print("Setup was done under", time_init-t0, "sec")
 
+    # ==================================================================================================================
     # UPDATE ANIMATION
     def update(_):
         time_now = time.time() - time_init - scene.time_in_pause
 
         # Avoid:
-            # TODO: unknown obs avoidance
+        # TODO: unknown obs avoidance
 
         # Async:
         fastest = np.argmin(end_of_trajectories)
@@ -97,8 +103,8 @@ if __name__ == '__main__':
 
             # Update drone
             fastest_drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
-            fastest_drone.flight_time = fligth_time
-            add_coll_matrix_to_elipsoids([fastest_drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
+            fastest_drone.fligth_time = fligth_time
+            add_coll_matrix_to_elipsoids([fastest_drone], graph, scene.Ts, scene.cmin, scene.cmax,
                                          scene.general_safety_distance)
 
             # Update flight times and select the next drone
