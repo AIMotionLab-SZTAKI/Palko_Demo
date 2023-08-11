@@ -7,8 +7,8 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection, Line3DCollection
 import stl
 
 
-from .Util_constuction import fit_spline
-from .Util_general import evaluate_splie
+from path_planning_and_obstacle_avoidance.Util_files.Util_constuction import fit_spline
+from path_planning_and_obstacle_avoidance.Util_files.Util_general import evaluate_splie
 
 
 def plot_arena(scene):

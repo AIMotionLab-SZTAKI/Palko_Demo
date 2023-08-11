@@ -2,8 +2,8 @@ import cProfile
 import pstats
 import time
 
-from .Classes import Construction, Drone
-from .Util_files.Util_trajectory_planning import *
+from path_planning_and_obstacle_avoidance.Classes import Construction, Drone
+from path_planning_and_obstacle_avoidance.Util_files.Util_trajectory_planning import *
 
 
 def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_distance):
@@ -11,9 +11,6 @@ def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_di
     # FIND ROUTE
     route, speed = find_route(drone.constant_speeds, G['graph'], dynamic_obstacles, other_drones,
                               drone.start_vertex, drone.target_vetrex, drone.start_time)
-    #route = simplify_route(Ts, cmin, cmax, speed, G, dynamic_obstacles, other_drones, static_obstacles,
-    #                       drone.start_vertex, drone.target_vetrex, drone.start_time, point_cloud_density,
-    #                       safety_distance, route)
 
     # FIT SPLINE
     line_buffer = 5
@@ -82,7 +79,7 @@ if __name__ == '__main__':
     targets = np.arange(target_zero, len(graph['graph'].nodes()), 1)
 
     np.random.seed(225)
-    drone_num = 5
+    drone_num = 3
     past_drones = []
 
     for i in range(drone_num):
@@ -94,10 +91,8 @@ if __name__ == '__main__':
         drone.target_vetrex = np.random.choice(targets)
         targets = np.delete(targets, targets == drone.target_vetrex)
         spline_path, speed_profile, fligth_time, length = generate_trajectory(drone, graph, dynamic_obstacles,
-                                                                              static_obstacles, past_drones, scene.Ts,
-                                                                              scene.cmin, scene.cmax,
-                                                                              scene.general_safety_distance,
-                                                                              scene.point_cloud_density)
+                                                                              past_drones, scene.Ts,
+                                                                              scene.general_safety_distance)
 
         drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
         drone.flight_time = fligth_time

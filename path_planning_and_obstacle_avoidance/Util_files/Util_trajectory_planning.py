@@ -1,12 +1,8 @@
 from queue import PriorityQueue
-import networkx as nx
-import numpy as np
-import matplotlib.pyplot as plt
 from gurobipy import *
 
-from .Util_constuction import intersect, create_point_cloud
-from .Util_general import *
-#Comment
+from path_planning_and_obstacle_avoidance.Util_files.Util_general import *
+
 
 def add_coll_matrix_to_shepres(obstacles, point_cloud, Ts, cmin, cmax, safety_distance):
     """
@@ -58,24 +54,6 @@ def find_route(speeds, G, dynamic_obstacles, other_drones, start_point, target_p
             best_speed = speed
 
     return final_route, best_speed
-
-
-def simplify_route(Ts, cmin, cmax, speed, G, dynamic_obstacles, other_drones, static_obstacles, start_point,
-                   target_point, start_time, point_cloud_density, safety_distance, base_route):
-    G_mini = generate_mini_graph(base_route, G, static_obstacles.enclosed_space_of_safe_zone,
-                                 static_obstacles.corners_of_safe_zone)
-    G_mini, mini_point_cloud = create_point_cloud(G_mini, point_cloud_density)
-    store_dyobs = [obs.collision_matrix for obs in dynamic_obstacles]
-    store_drones = [obs.collision_matrix for obs in other_drones]
-    add_coll_matrix_to_shepres(dynamic_obstacles, mini_point_cloud, Ts, cmin, cmax, safety_distance)
-    add_coll_matrix_to_elipsoids(other_drones, mini_point_cloud, Ts, cmin, cmax, safety_distance)
-    simple_route, _ = A_star(G_mini, dynamic_obstacles, other_drones, start_point, target_point, speed)
-    for i, coll_matrix in enumerate(store_dyobs):
-        dynamic_obstacles[i].collision_matrix = coll_matrix
-    for i, coll_matrix in enumerate(store_drones):
-        other_drones[i].collision_matrix = coll_matrix
-
-    return simple_route
 
 
 def A_star(G, dynamic_obstacles, other_drones, start_point, target_point, start_time, drone_speed):
@@ -161,26 +139,6 @@ def summ_collision_costs(obstacles, tspan, edege_collisions, cc):
 
         cc = cc + collision_cost
     return cc
-
-
-def generate_mini_graph(route, G, occupied_spaces, corners):
-    """
-    Constuct a mini graph based on the route found by the A*
-    """
-    graph_adj = {}
-    for i, vertex in enumerate(route):
-        graph_adj[vertex] = route[i + 1:]
-        graph_adj[vertex] = [neighbour for neighbour in graph_adj[vertex] if not intersect(G.nodes()[vertex]['pos'],
-                                                                                           G.nodes()[neighbour]['pos'],
-                                                                                           occupied_spaces, corners)]
-    G_mini = nx.Graph()
-    for i in route:
-        G_mini.add_node(i, pos=G.nodes()[i]['pos'])
-    for i in graph_adj:
-        for j in graph_adj[i]:
-            G_mini.add_edge(i, j, weight=abs(np.linalg.norm(G.nodes()[i]['pos'] - G.nodes()[j]['pos'])))
-
-    return G_mini
 
 
 def extend_route(route, G, LINE_BUFFER):
@@ -360,8 +318,6 @@ def choose_target(scene, drone, return_home: bool = False):
     if return_home:
         drone.target_vetrex = np.random.choice(scene.home_positions)
         scene.home_positions = np.delete(scene.home_positions, scene.home_positions == drone.target_vetrex)
-        # print(f"home positions: {scene.home_positions}")
     else:
         drone.target_vetrex = np.random.choice(scene.free_targets)
         scene.free_targets = np.delete(scene.free_targets, scene.free_targets == drone.target_vetrex)
-    # print(f"Start:target: {drone.start_vertex, drone.target_vetrex}")

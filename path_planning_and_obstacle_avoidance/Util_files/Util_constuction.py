@@ -5,8 +5,8 @@ import motioncapture
 import matplotlib.pyplot as plt
 from gurobipy import *
 
-from .Util_general import *
-from ..Classes import Dynamic_obstacle, Drone
+from path_planning_and_obstacle_avoidance.Util_files.Util_general import *
+from path_planning_and_obstacle_avoidance.Classes import Dynamic_obstacle, Drone
 
 #=======================================================================================================================
 # FOR: STATIC OBSTACLES

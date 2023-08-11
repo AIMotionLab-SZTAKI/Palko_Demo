@@ -1,10 +1,9 @@
 import cProfile
 import pstats
 
-
-from .Util_files.Util_constuction import *
-from .Util_files.Util_visualization import *
-from .Classes import Construction, Static_obstacles
+from path_planning_and_obstacle_avoidance.Util_files.Util_constuction import *
+from path_planning_and_obstacle_avoidance.Util_files.Util_visualization import *
+from path_planning_and_obstacle_avoidance.Classes import Construction, Static_obstacles
 
 
 # ======================================================================================================================
@@ -93,18 +92,21 @@ def construction():
 # ======================================================================================================================
     # SAVES
 
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/number_of_targets.pickle",
-                len(V_fix))
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/base_graph.pickle",
-                {'graph': base_graph, 'point_cloud': base_point_cloud})
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/densed_graph.pickle",
-                {'graph': densed_graph, 'point_cloud': densed_point_cloud})
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/static_obstacles.pickle",
-                static_obstacles)
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/paths_of_dynamic_obstacles.pickle",
-                paths_points)
-    pickle_save("path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/dynamic_obstacles.pickle",
-                dynamic_obstacles)
+    # Check if the directories made to contain generrated files are exists. If not make them.
+    dir_path = os.getcwd()
+    if not os.path.exists(dir_path + "/Pickle_saves"):
+        os.mkdir(dir_path + "/Pickle_saves")
+    if not os.path.exists(dir_path + "/Pickle_saves/Construction_saves"):
+        os.mkdir(dir_path + "/Pickle_saves/Construction_saves")
+
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/number_of_targets.pickle", len(V_fix))
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/base_graph.pickle", {'graph': base_graph,
+                                                                                'point_cloud': base_point_cloud})
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/densed_graph.pickle", {'graph': densed_graph,
+                                                                                  'point_cloud': densed_point_cloud})
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/static_obstacles.pickle", static_obstacles)
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/paths_of_dynamic_obstacles.pickle", paths_points)
+    pickle_save(dir_path+"/Pickle_saves/Construction_saves/dynamic_obstacles.pickle", dynamic_obstacles)
     print("ALL SAVED")
     plt.show()
     graph = {
@@ -114,6 +116,7 @@ def construction():
     return len(V_fix), graph
 # ======================================================================================================================
     # SELECTIONS
+
 
 def select_fix_obstacle_set(index_of_obstacle_set):
     """
