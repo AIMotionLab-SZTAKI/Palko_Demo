@@ -20,7 +20,7 @@ def construction():
     # DIMENSIONS OF THE  FLYING ARENA
     scene = Construction()
 
-    plot_arena(scene)
+    plot_arena(scene.dimensions)
 
 # ======================================================================================================================
     # PLACE STATIC OBSTACLES

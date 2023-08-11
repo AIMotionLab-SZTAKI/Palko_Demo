@@ -12,7 +12,7 @@ class Construction:
         # The dimensions of the flying area. (x_min, x_max, y_min, y_max, z_min, z_max)
         self.dimensions = np.array([-1.7, 1.7, -1.7, 1.7, 0.2, 1.3])
         # The safety distance aruond each obstacle. (It can be modified for the individual obstacles)
-        self.general_safety_distance = 0.15
+        self.general_safety_distance = 0.1
 
         #...............................................................................................................
         # STATIC OBSTACLE RELATED PARAMETERS:
