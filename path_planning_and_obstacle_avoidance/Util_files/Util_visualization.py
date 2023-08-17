@@ -142,9 +142,9 @@ def ask_for_paths(dimensions: np.ndarray) -> list:
                   'Stop adding points with right mouse click')
         else:
             paths_points.append(copy.deepcopy(points))
-            spline = fit_spline(points)
+            spline = fit_spline(np.array(points))
             spline_points = evaluate_splie(spline)
-            ax.add_collection3d(Line3DCollection(spline_points, facecolor='black', alpha=0.5))
+            ax.plot(spline_points[0], spline_points[1], spline_points[2], 'black', lw=2)
             points.clear()
 
     x_slider.on_changed(update)
@@ -158,7 +158,7 @@ def ask_for_paths(dimensions: np.ndarray) -> list:
 
 
 def sphere_surface(radius, resolution):
-    theta = np.linspace(0, 2 * np.pi, resolution)
+    theta = np.linspace(0, np.pi, resolution)
     phi = np.linspace(0, np.pi, resolution)
     verts2 = []
     for i in range(len(phi) - 1):
@@ -175,6 +175,27 @@ def sphere_surface(radius, resolution):
                      (cp0 * ct1, sp0 * ct1, st1)]
             verts2.append(verts)
     return verts2
+
+
+def cylinder_surface(radius: float, resolution: int) -> np.ndarray:
+    phi = np.linspace(0, 360, resolution) / 180.0 * np.pi
+    z = np.linspace(0, 1.5, 2)
+
+    PHI, Z = np.meshgrid(phi, z)
+    CP = radius * np.cos(PHI)
+    SP = radius * np.sin(PHI)
+    XYZ = np.dstack([CP, SP, Z])
+    verts = np.stack([XYZ[:-1, :-1], XYZ[:-1, 1:], XYZ[1:, 1:], XYZ[1:, :-1]], axis=-2).reshape(-1, 4, 3)
+
+    return verts
+
+
+def place_cylinder(ax, cylinders, resolution, visibility, color):
+    for cylinder in cylinders:
+        cylinder.surface = cylinder_surface(cylinder.radius, resolution)
+        cylinder.position = cylinder.move(t=np.array(0))
+        cylinder.plot_face = ax.add_collection3d(Poly3DCollection(cylinder.surface + cylinder.position,
+                                                                  alpha=visibility, facecolors=color))
 
 
 def plot_spline(spline):

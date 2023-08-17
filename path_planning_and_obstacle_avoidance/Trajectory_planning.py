@@ -10,10 +10,14 @@ def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_di
 
     # ==================================================================================================================
     # SUMM COLLISION MATRICES
-    # TODO: time_min should not be the min of other drones but the start time of the actual drone
-    time_min, time_max = select_collision_matrix_time_window(other_drones)
+    time_min = drone.start_time
+    time_max = 0.0
+    time_max = select_collision_matrix_time_window(other_drones, time_max)
+    time_max = select_collision_matrix_time_window(dynamic_obstacles, time_max)
     coll_matrix_summ = summ_collision_matrices(other_drones, time_min, time_max, Ts)
-
+    if not len(dynamic_obstacles) == 0:
+        coll_matrix_summ_obs = summ_collision_matrices(dynamic_obstacles, time_min, time_max, Ts)
+        coll_matrix_summ[1:, 1:] += coll_matrix_summ_obs[1:, 1:]
     # ==================================================================================================================
     # FIND ROUTE
     route, speed = find_route(drone.constant_speeds, G['graph'], dynamic_obstacles, other_drones,

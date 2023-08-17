@@ -88,8 +88,8 @@ def construction():
         paths_points.extend(new_paths_points[:])
 
     dynamic_obstacles = generate_dynamic_obstacles(paths_points, scene.speed_of_individual_dynamic_obstacles,
-                                                   scene.default_speed, scene.radii_of_individual_dynamic_obstacles,
-                                                   scene.default_radius, scene.path_of_dynamic_obstacles)
+                                                   scene.radii_of_individual_dynamic_obstacles,
+                                                   scene.path_of_dynamic_obstacles, scene.movement_start)
 
 # ======================================================================================================================
     # SAVES

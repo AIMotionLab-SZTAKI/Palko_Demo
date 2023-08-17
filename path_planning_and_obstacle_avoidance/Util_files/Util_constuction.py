@@ -525,6 +525,7 @@ def load_edges_to_graph(graph: nx.Graph, edges: list, max_edge_length: float) ->
 
     :param graph: nx.Graph object without edges
     :param edges: [[neighbours of v_0]...[neighbours of v_N]] -> adjacency list
+    :param max_edge_length: float -> the maximum length of the edges (longer edges are not added to the graph)
     :return: graph: nx.Graph object with edges
     """
     for vertex, neighbours in enumerate(edges):
@@ -704,21 +705,20 @@ def load_paths() -> list:
         return []
 
 
-def generate_dynamic_obstacles(paths_points: list, individual_speeds: np.ndarray, default_speed: float,
-                               individual_radii: np.ndarray, default_radius: float, desired_paths: np.ndarray) -> list:
+def generate_dynamic_obstacles(paths_points: list, speeds: np.ndarray, radii: np.ndarray, desired_paths: np.ndarray,
+                               start_times: np.ndarray) -> list:
     """
     Generate the dynamic obstacles.
 
     :param paths_points: [[p]...[p]], where p=[[x,y,z]...[x,y,z]] -> points of the paths of the obstacles
-    :param individual_speeds: array([obstacle_idx, speed]...[idx, speed]) -> define the speed of the obstacles
-    :param default_speed: float -> if an obstacle does not have a speed assigned to it use this
-    :param individual_radii: array([obstacle_idx, radius]...[idx, radius]) -> define the radius of the obstacles
-    :param default_radius: float -> if an obstacle does not have a radius assigned to it use this
+    :param speeds: array([obstacle_idx, speed]...[idx, speed]) -> define the speed of the obstacles
+    :param radii: array([obstacle_idx, radius]...[idx, radius]) -> define the radius of the obstacles
     :param desired_paths: array([path_idx, path_idx, path_idx]) -> define the paths of the obstacles
+    :param start_times: array([obstacle_idx, start_time]...[idx, start_time]) -> define the start of obstacle movements
     :return: dynamic_obstacles: list containing the generated dynamic_obstacle objects
     """
+
     dynamic_obstacles = []
-    ID = 0
     for i, points in enumerate(paths_points):
         if i not in desired_paths:
             continue
@@ -726,15 +726,19 @@ def generate_dynamic_obstacles(paths_points: list, individual_speeds: np.ndarray
         spline = fit_spline(points)
         spline, length = parametrize_by_path_length(spline)
 
-        if i in individual_speeds[:, 0]:
-            speed = individual_speeds[i, 1]
+        if i in speeds[:, 0]:
+            speed = speeds[speeds[:, 0] == i][0][1]
         else:
-            speed = default_speed
-        if i in individual_radii[:, 0]:
-            radius = individual_radii[i, 1]
+            speed = speeds[-1, 1]
+        if i in radii[:, 0]:
+            radius = radii[radii[:, 0] == i][0][1]
         else:
-            radius = default_radius
+            radius = radii[-1, 1]
+        if i in start_times[:, 0]:
+            start_time = start_times[start_times[:, 0] == i][0][1]
+        else:
+            start_time = start_times[-1, 1]
 
-        dynamic_obstacles.append(Dynamic_obstacle(path_tck=spline, path_length=length, speed=speed, radius=radius))
-        ID += 1
+        dynamic_obstacles.append(Dynamic_obstacle(path_tck=spline, path_length=length, speed=speed, radius=radius,
+                                                  start_time=start_time))
     return dynamic_obstacles
