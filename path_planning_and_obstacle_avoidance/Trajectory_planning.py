@@ -6,7 +6,7 @@ from path_planning_and_obstacle_avoidance.Classes import Construction, Drone
 from path_planning_and_obstacle_avoidance.Util_files.Util_trajectory_planning import *
 
 
-def generate_trajectory(drone, G, dynamic_obstacles, other_drones, Ts, safety_distance):
+def generate_trajectory(drone, G: dict, dynamic_obstacles, other_drones, Ts, safety_distance):
 
     # ==================================================================================================================
     # SUMM COLLISION MATRICES

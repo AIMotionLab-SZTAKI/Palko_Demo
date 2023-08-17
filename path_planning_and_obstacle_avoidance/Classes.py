@@ -66,7 +66,7 @@ class Construction:
         # Select a predefined layout for the manualy added vertices.
         # (0 or not defined layout number results in an empty space)
         # More layouts can be defined in the Scene_constuction.py.
-        self.fix_vertex_layout = 1
+        self.fix_vertex_layout = 2
         # The maximum distance between the points in the point cloud of a graph.
         self.point_cloud_density = 0.05
         # The generation of the densed graph can be switched off to reduce the run time of Scene_construction
