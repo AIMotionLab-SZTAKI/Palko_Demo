@@ -32,11 +32,11 @@ def get_obstacles_positions_from_optitrack(new_measurement: bool) -> dict:
         check_maximum_deviation(obstacles_dict)
         for name in obstacles_dict:
             obstacles_dict[name] = np.sum(obstacles_dict[name], axis=0) / len(obstacles_dict[name])
-        pickle_save(dir_path + "/Pickle_saves/Construction_saves/obstacle_measurement.pickle", obstacles_dict)
+        pickle_save(dir_path + "/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/obstacle_measurement.pickle", obstacles_dict)
 
     else:
         try:
-            obstacles_dict = pickle_load(dir_path + "/Pickle_saves/Construction_saves/obstacle_measurement.pickle")
+            obstacles_dict = pickle_load(dir_path + "/path_planning_and_obstacle_avoidance/Pickle_saves/Construction_saves/obstacle_measurement.pickle")
         except FileNotFoundError:
             print_WARNING("No existing obstacle measurements available!!!")
             obstacles_dict = {}
@@ -53,7 +53,7 @@ def get_measurement(sample_size: int) -> dict:
                                                        positions -> list of measured coordinates of the top center of
                                                                     the obstacles np.array([[x,y,z]...[x,y,z]])
     """
-    mc = motioncapture.MotionCaptureOptitrack("192.168.1.141")
+    mc = motioncapture.MotionCaptureOptitrack("192.168.1.142")
     obstacles_dict = {}
     for _ in range(sample_size):
         mc.waitForNextFrame()

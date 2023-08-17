@@ -317,7 +317,7 @@ def determine_id(string):
 
 
 def determine_home_position(drone_ID: str):
-    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.141")
+    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.142")
     mocap.waitForNextFrame()
     items = mocap.rigidBodies.items()
     # let's put the rigid bodies containing cf index into a dictionary with their IDs.
@@ -347,7 +347,7 @@ def determine_home_position(drone_ID: str):
 
 def verify_drones(drone_IDs: List[str]):
     '''Function that asserts we have exactly the drones that we want in frame.'''
-    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.141")
+    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.142")
     mocap.waitForNextFrame()
     items = mocap.rigidBodies.items()
     drones = [(determine_id(name), list(obj.position[:-1])) for name, obj in items if 'cf' in name]
@@ -425,7 +425,7 @@ class DroneHandler:
     async def _calculate(self, last: bool):
         print(f"[{elapsed_time():.3f}] {self.drone_ID}: Got calculate command. Trajectory should start in {self.drone.rest_time} sec")
         choose_target(scene, self.drone, last)  # last==True will mean that the target chosen will be the home position
-        self.drone.start_time = elapsed_time() + self.drone.rest_time  # required for trajectory calculation
+        self.drone.start_time = round(elapsed_time() + self.drone.rest_time, 1) # required for trajectory calculation
         self._start_deadline = current_time() + self.drone.rest_time  # deadline for starting the trajectory
         other_drones = [drone for drone in drones if drone.cf_id != self.drone_ID]
         # print(f"{self.drone_ID}: other drones are {[drone.cf_id for drone in other_drones]}")
@@ -438,7 +438,7 @@ class DroneHandler:
         self.drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
         # self.drone.flight_time = self.drone.trajectory['speed_profile'][0][-1]
         self.drone.fligth_time = duration
-        add_coll_matrix_to_elipsoids([self.drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
+        add_coll_matrix_to_elipsoids([self.drone], graph, scene.Ts, scene.cmin, scene.cmax,
                                      scene.general_safety_distance)
         traj_json = splines_to_json(spline_path, speed_profile, self.drone_ID, self.traj_id)
         self.traj_id += 1
@@ -566,8 +566,8 @@ async def demo():
 
 # This list has to be set manually to the drones we want to fly. This is inconvenient, but that's the point: it forces
 # us to manually double check if we are using the correct drones.
-drone_IDs = ["04", "06", "07", "08"]
-# drone_IDs = ["08", "04"]
+# drone_IDs = ["04", "06", "07", "08"]
+drone_IDs = ["07", "08"]
 verify_drones(drone_IDs)  # throw an error if the drones in frame are not exactly the drones we set above
 
 # create the folders where we will store trajectory json files (for backup, logging and skyc generation)
@@ -587,10 +587,10 @@ if os.path.exists(log_folder_path):
     shutil.rmtree(log_folder_path)
 os.makedirs(log_folder_path)
 
-np.random.seed(1001)
+np.random.seed(100)
 number_of_targets, graph = construction()
 scene = Construction()
-demo_time = 20  # sec
+demo_time = 40  # sec
 
 # SETUP DRONES
 target_zero = len(graph['graph'].nodes()) - number_of_targets
@@ -640,7 +640,7 @@ for i, drone_ID in enumerate(drone_IDs):
                                                                        safety_distance=scene.general_safety_distance)
     drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
     drone.fligth_time = duration
-    add_coll_matrix_to_elipsoids([drone], graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
+    add_coll_matrix_to_elipsoids([drone], graph, scene.Ts, scene.cmin, scene.cmax,
                                  scene.general_safety_distance)
     drones.append(drone)  # for the next drone, this current drone will count as part of 'other_drones': avoid collision
 

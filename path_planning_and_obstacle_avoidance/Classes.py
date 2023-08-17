@@ -21,7 +21,7 @@ class Construction:
         # If true then use the optritrack measurements, otherwise use a simulated layout.
         self.real_obstacles = True
         # If true then the position of the obstacles are measured, otherwise use a saved layout.
-        self.get_new_measurement = False
+        self.get_new_measurement = True
         # Select one of the predefined simulated layouts. (0 or not defined layout number results in an empty space)
         # More layouts can be defined in the Scene_constuction.py.
         self.static_obstacle_layout = 0
@@ -37,7 +37,7 @@ class Construction:
         # DYNAMIC OBSTACLE RELATED PARAMETERS:
 
         # Ask for new paths during construction.
-        self.ask_for_new_paths = True
+        self.ask_for_new_paths = False
         # Keep the previousli saved paths or wipe clean the saves.
         self.keep_existing_paths = False
         # !!! During construction as many obstacles will be maid as many paths are given here !!!
@@ -66,7 +66,7 @@ class Construction:
         # Select a predefined layout for the manualy added vertices.
         # (0 or not defined layout number results in an empty space)
         # More layouts can be defined in the Scene_constuction.py.
-        self.fix_vertex_layout = 0
+        self.fix_vertex_layout = 1
         # The maximum distance between the points in the point cloud of a graph.
         self.point_cloud_density = 0.05
         # The generation of the densed graph can be switched off to reduce the run time of Scene_construction
