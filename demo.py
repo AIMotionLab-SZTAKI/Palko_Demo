@@ -5,7 +5,7 @@ from path_planning_and_obstacle_avoidance.Trajectory_planning import *
 import re
 import sys
 import trio
-from trio import sleep, sleep_until
+from trio import sleep, sleep_until, current_time, Event
 import json
 from scipy import interpolate
 import numpy as np
@@ -18,11 +18,9 @@ import shutil
 import zipfile
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import gurobipy
-# from time import time as real_time
 from trio import current_time
-from math import ceil
 import motioncapture
-
+from functools import partial
 
 def cleanup(files: List[str], folders: List[str]):
     # function meant for deleting unnecessary files
@@ -127,17 +125,8 @@ def write_to_skyc(type: str):
         # The trajectory is saved to a json file with the data below
         write_trajectory(Data, type=type)
 
-        lights = {
-            "data": "BqQUDAME//8ABQoFAg8NBP//AAUJTAUCjAEKlgEA",
-            "version": 1
-        }
-        json_object = json.dumps(lights, indent=2)
-        with open("lights.json", "w") as f:
-            f.write(json_object)
-
         drone_settings = {
             "trajectory": {"$ref": f"./drones/drone_{index}/trajectory.json#"},
-            "lights": {"$ref": f"./drones/drone_{index}/lights.json#"},
             "home": Data[0][1],
             "landAt": Data[-1][1],
             "name": f"drone_{index}"
@@ -152,8 +141,6 @@ def write_to_skyc(type: str):
         os.makedirs(drone_folder, exist_ok=True)
 
 
-        # Copy 'lights.json' and 'trajectory.json' to 'drone_1' folder
-        shutil.move('lights.json', drone_folder)
         shutil.move('trajectory.json', drone_folder)
     # This wall of text below is just overhead that is required to make a skyc file.
     ########################################CUES.JSON########################################
@@ -217,8 +204,7 @@ def write_to_skyc(type: str):
     cleanup(files=["show.json",
                    "cues.json",
                    f"{name}.zip",
-                   "trajectory.json",
-                   "lights.json"],
+                   "trajectory.json"],
             folders=["drones"])
     print("Demo skyc file ready!")
 
@@ -371,6 +357,7 @@ class DroneHandler:
     traj: Dict
     drone_ID: str
     live_demo: bool
+    interrupt: Event
     # trajectory: Tuple[List[Union[np.ndarray, List[np.ndarray], int]], Tuple[np.ndarray, np.ndarray, int]]
 
     def __init__(self, socket: trio.SocketStream, takeoff_height: float, drone_ID: str):
@@ -408,6 +395,34 @@ class DroneHandler:
             os.remove(log_file_path)
         open(log_file_path, 'a').close()
         self.log = log_file_path
+        self.interrupt = Event()
+
+
+    async def interruptable_sleep(self, seconds) -> bool:
+        was_interrupted = False
+        with trio.move_on_after(seconds) as cancel_scope:
+            await self.interrupt.wait()
+            was_interrupted = True
+            print(f"[{elapsed_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
+            cancel_scope.cancel()
+        self.interrupt = trio.Event()
+        return was_interrupted
+
+    async def interruptable_sleep_until(self, deadline) -> bool:
+        was_interrupted = False
+        with trio.move_on_at(deadline) as cancel_scope:
+            await self.interrupt.wait()
+            was_interrupted = True
+            print(f"[{elapsed_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
+            cancel_scope.cancel()
+        self.interrupt = trio.Event()
+        return was_interrupted
+
+    async def clear_queue(self):
+        while self.receive_channel.statistics().current_buffer_used != 0:
+            _ = self.receive_channel.receive()
+        print(f"[{elapsed_time():.3f}] {self.drone_ID}: Cleared items in queue.")
+
 
     async def send_and_ack(self, data: bytes):
         await self.limiter.limit()  # for safe communication, limit the rate of outgoing messages
@@ -455,8 +470,10 @@ class DroneHandler:
     async def _upload(self, arg):
         self.traj = arg
         await self.send_and_ack(f"CMDSTART_upload_{self.traj}_EOF".encode())
-        await sleep_until(self._start_deadline)
-        await self.enqueue_command("start", traj_type)  # upload commands are always followed by a start command
+        # await sleep_until(self._start_deadline)
+        recvd_interrupt = await self.interruptable_sleep_until(self._start_deadline)
+        if not recvd_interrupt:
+            await self.enqueue_command("start", traj_type)  # upload commands are always followed by a start command
 
     async def _land(self, arg):
         assert arg is None
@@ -470,11 +487,13 @@ class DroneHandler:
             # self.drone.flight_time could be read from self.traj as well
             await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
             print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.fligth_time}")
-            await sleep(self.drone.fligth_time)  # while the drone is traversing the trajectory, wait
-            if self.landing:  # self.landing signals that we don't need any more trajectories
-                await self.enqueue_command("land", None)
-            else:  # if elapsed time is more than demo time, that means we should calculate the return to home
-                await self.enqueue_command("calculate", elapsed_time() > demo_time)
+            # await sleep(self.drone.fligth_time)  # while the drone is traversing the trajectory, wait
+            recvd_interrupt = await self.interruptable_sleep(self.drone.fligth_time)
+            if not recvd_interrupt:
+                if self.landing:  # self.landing signals that we don't need any more trajectories
+                    await self.enqueue_command("land", None)
+                else:  # if elapsed time is more than demo time, that means we should calculate the return to home
+                    await self.enqueue_command("calculate", elapsed_time() > demo_time)
         else:
             print(f"Invalid trajectory type (not absolute or relative)")
 
@@ -531,6 +550,26 @@ async def establish_connection_with_handler(drone_id: str):
     else:
         return None
 
+async def tcp_handler(stream: trio.SocketStream, handlers: Dict[str, DroneHandler]):
+    print(f"TCP connection to car handler made.")
+    while True:
+        try:
+            data: bytes = await stream.receive_some()
+            if not data:
+                break
+            id = "0"+data.decode("utf-8") if len(data) == 1 else data.decode("utf-8")
+            if id not in handlers:
+                print(f"Incorrect ID. Valid IDs are {handlers.keys()}")
+            else:
+                handler = handlers[id]
+                await handler.clear_queue()
+                await handler.enqueue_command("calculate", elapsed_time() > demo_time)
+                handler.interrupt.set()
+        except Exception as exc:
+            print(f"TCP connection to car handler crashed with exception: {exc!r}")
+
+
+
 async def demo():
     print("Welcome to Palkovits Máté's drone demo!")
     await sleep(1)
@@ -563,11 +602,16 @@ async def demo():
             handlers[drone_ID]._start_deadline = demo_start_deadline  # set the drone to start after the hover period
             await handlers[drone_ID].enqueue_command("takeoff", takeoff_height)
             await handlers[drone_ID].enqueue_command("upload", traj_json)
+        await sleep(TAKEOFF_TIME + REST_TIME)
+        print(f"READY FOR CAR PORT!")
+        with trio.move_on_after(demo_time + TAKEOFF_TIME + REST_TIME):
+            await trio.serve_tcp(partial(tcp_handler, handlers=handlers), CAR_PORT)
+
 
 # This list has to be set manually to the drones we want to fly. This is inconvenient, but that's the point: it forces
 # us to manually double check if we are using the correct drones.
 # drone_IDs = ["04", "06", "07", "08"]
-drone_IDs = ["07", "08"]
+drone_IDs = ["04", "06"]
 verify_drones(drone_IDs)  # throw an error if the drones in frame are not exactly the drones we set above
 
 # create the folders where we will store trajectory json files (for backup, logging and skyc generation)
@@ -600,7 +644,7 @@ scene.free_targets = target_list
 
 NUM_OF_DRONES = len(drone_IDs)
 # Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
-LIVE_DEMO = False
+LIVE_DEMO = True
 REST_TIME = 3  # This is how much drones will hover between trajectories. Calculations are run during these rests.
 # This is NOT how long it takes to perform takeoff. That is determined by the server and the firmware. This is how much
 # we wait after dispatching the takeoff command, before continuing. Set this to a common sense value that will obviously
@@ -616,6 +660,7 @@ granularity = 1001
 # only goes up to 5. I guess we could also use degree 1, but come on, we're professionals over here.
 degree = 3
 PORT = 6000  # The TCP port for server side communication
+CAR_PORT = PORT+1
 traj_type = "absolute"
 
 scene.home_positions = scene.free_targets[-NUM_OF_DRONES:]  # the home positions are appended to the end of the nodes
@@ -647,7 +692,7 @@ for i, drone_ID in enumerate(drone_IDs):
 trio.run(demo)
 
 # at this point the demo is over and the trajectories are ready to be processed
-write_to_skyc(type="COMPRESSED")
+# write_to_skyc(type="COMPRESSED") # TODO: FIX
 
 
 
