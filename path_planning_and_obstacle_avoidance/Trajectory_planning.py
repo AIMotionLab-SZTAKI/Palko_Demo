@@ -11,13 +11,16 @@ def generate_trajectory(drone, G: dict, dynamic_obstacles, other_drones, Ts, saf
     # ==================================================================================================================
     # SUMM COLLISION MATRICES
     time_min = drone.start_time
-    time_max = 0.0
+    time_max = time_min
     time_max = select_collision_matrix_time_window(other_drones, time_max)
     time_max = select_collision_matrix_time_window(dynamic_obstacles, time_max)
     coll_matrix_summ = summ_collision_matrices(other_drones, time_min, time_max, Ts)
     if not len(dynamic_obstacles) == 0:
         coll_matrix_summ_obs = summ_collision_matrices(dynamic_obstacles, time_min, time_max, Ts)
-        coll_matrix_summ[1:, 1:] += coll_matrix_summ_obs[1:, 1:]
+        if len(coll_matrix_summ) !=0:
+            coll_matrix_summ[1:, 1:] += coll_matrix_summ_obs[1:, 1:]
+        else:
+            coll_matrix_summ = coll_matrix_summ_obs
     # ==================================================================================================================
     # FIND ROUTE
     route, speed = find_route(drone.constant_speeds, G['graph'], dynamic_obstacles, other_drones,
@@ -90,8 +93,8 @@ if __name__ == '__main__':
     static_obstacles = pickle_load("Pickle_saves/Construction_saves/static_obstacles.pickle")
     number_of_targets = pickle_load("Pickle_saves/Construction_saves/number_of_targets.pickle")
     scene = Construction()
-    add_coll_matrix_to_shepres(dynamic_obstacles, graph['point_cloud'], scene.Ts, scene.cmin, scene.cmax,
-                               scene.general_safety_distance)
+    add_coll_matrix_to_poles(dynamic_obstacles, graph, scene.Ts, scene.cmin, scene.cmax,
+                             scene.general_safety_distance)
 
     target_zero = len(graph['graph'].nodes()) - number_of_targets
     targets = np.arange(target_zero, len(graph['graph'].nodes()), 1)

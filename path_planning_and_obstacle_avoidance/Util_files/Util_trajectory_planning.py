@@ -127,7 +127,7 @@ def summ_collision_matrices(other_drones: list, time_min: float, time_max: float
     summed_coll_matrix = np.array([])
 
     # skip in case of the very first trajectory generation
-    if time_max == 0:
+    if len(other_drones) == 0:
         return summed_coll_matrix
 
     tgrid = np.arange(round(time_min/Ts), round(time_max/Ts)+1, 1)*Ts
