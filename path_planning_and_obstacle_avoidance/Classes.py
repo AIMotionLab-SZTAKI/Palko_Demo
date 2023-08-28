@@ -50,7 +50,7 @@ class Construction:
                                                                [2, 0.5],
                                                                [-1, 0.5]]) # default
         # The radius of the static obstacles can be set individuali by providing a drone ID, radius pair.
-        self.radii_of_individual_dynamic_obstacles = np.array([[0, 0.1],   # [ID, speed]
+        self.radii_of_individual_dynamic_obstacles = np.array([[0, 0.1],   # [ID, radius]
                                                                [1, 0.1],
                                                                [2, 0.1],
                                                                [-1, 0.1]]) # default
@@ -148,6 +148,7 @@ class Dynamic_obstacle:
         s = np.where(s < self.path_length, s, self.path_length)  # set maximum value for the path length
         position = np.transpose(interpolate.splev(s, self.path_tck))
         if np.size(t) == 1:
+            print(position)
             position[2] = 0
         else:
             position[:, 2] = 0
@@ -179,10 +180,11 @@ class Drone:
         self.plot_stl = None
         self.collision_matrix = None
         self.collision_matrix_compressed = None
+        self.emergency = False
 
     def move(self, t: np.ndarray) -> np.ndarray:
-        t = np.where(t > self.start_time, t, self.start_time)
-        t = np.where(t < self.start_time + self.fligth_time, t, self.start_time + self.fligth_time)
+        t = np.where(t > self.trajectory['speed_profile'][0][0], t, self.trajectory['speed_profile'][0][0])
+        t = np.where(t < self.trajectory['speed_profile'][0][-1], t, self.trajectory['speed_profile'][0][-1])
         s = interpolate.splev(t, self.trajectory['speed_profile'])
         position = interpolate.splev(s, self.trajectory['spline_path'])
         return np.transpose(position)

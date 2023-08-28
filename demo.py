@@ -1,3 +1,5 @@
+import math
+import subprocess
 from path_planning_and_obstacle_avoidance.Scene_construction import construction
 from path_planning_and_obstacle_avoidance.Classes import Construction, Drone
 import pickle
@@ -18,9 +20,10 @@ import shutil
 import zipfile
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import gurobipy
-from trio import current_time
 import motioncapture
 from functools import partial
+from copy import  deepcopy
+from path_planning_and_obstacle_avoidance.Util_files.Util_general import print_WARNING
 
 def cleanup(files: List[str], folders: List[str]):
     # function meant for deleting unnecessary files
@@ -261,7 +264,6 @@ def splines_to_json(spline_path: List[Union[np.ndarray, List[np.ndarray], int]],
                      list(y_BPoly.c.transpose())[degree:-degree],
                      list(z_BPoly.c.transpose())[degree:-degree]))
     BPoly = [[element[0]] + list(zip(*list(element[1:]))) for element in BPoly]
-    # adding a takeoff segment:
     Data = [[t[0], [x[0], y[0], z[0]], []]]
     for Bezier_Curve in BPoly:
         curve_to_append = [Bezier_Curve[0],
@@ -336,8 +338,12 @@ def verify_drones(drone_IDs: List[str]):
     mocap = motioncapture.MotionCaptureOptitrack("192.168.1.142")
     mocap.waitForNextFrame()
     items = mocap.rigidBodies.items()
-    drones = [(determine_id(name), list(obj.position[:-1])) for name, obj in items if 'cf' in name]
-    assert set(drone[0] for drone in drones) == set(drone_IDs)
+    # drones = [(determine_id(name), list(obj.position[:-1])) for name, obj in items if 'cf' in name]
+    # assert set(drone[0] for drone in drones) == set(drone_IDs)
+
+    drones = [determine_id(name) for name, obj in items if 'cf' in name]
+    for drone_ID in drone_IDs:
+        assert drone_ID in drones
 
 
 class TcpCommand:
@@ -375,13 +381,15 @@ class DroneHandler:
             "land": self._land,
             "upload": self._upload,
             "start": self._start,
-            "calculate": self._calculate
+            "calculate": self._calculate,
+            "emergency_calculate": self._emergency_calculate
         }
         self.traj_id = 1  # this is here in case we want to limit how many trajectories should be in a demo
         self._start_deadline = None  # this is the timestamp by which trajectories must be started
         self.landing = False  # show that the drone is finished with the demo and is about to land
         self.on_ground = False
         self.limiter = RateLimiter(500)  # for safe communication, limit the rate of outgoing messages to 500Hz
+        self.calc_time = 1
 
         # make folders for trajectory files and log files:
         sub_folder_path = os.path.join(traj_folder_path, drone_ID)
@@ -403,7 +411,7 @@ class DroneHandler:
         with trio.move_on_after(seconds) as cancel_scope:
             await self.interrupt.wait()
             was_interrupted = True
-            print(f"[{elapsed_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
+            print(f"[{display_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
             cancel_scope.cancel()
         self.interrupt = trio.Event()
         return was_interrupted
@@ -413,21 +421,20 @@ class DroneHandler:
         with trio.move_on_at(deadline) as cancel_scope:
             await self.interrupt.wait()
             was_interrupted = True
-            print(f"[{elapsed_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
+            print(f"[{display_time():.3f}] {self.drone_ID}: Woke up from sleep due to interrupt!")
             cancel_scope.cancel()
         self.interrupt = trio.Event()
         return was_interrupted
 
     async def clear_queue(self):
         while self.receive_channel.statistics().current_buffer_used != 0:
-            _ = self.receive_channel.receive()
-        print(f"[{elapsed_time():.3f}] {self.drone_ID}: Cleared items in queue.")
-
+            _ = await self.receive_channel.receive()
+        print(f"[{display_time():.3f}] {self.drone_ID}: Cleared items in queue.")
 
     async def send_and_ack(self, data: bytes):
         await self.limiter.limit()  # for safe communication, limit the rate of outgoing messages
         with open(self.log, 'a') as log:  # note the command to the log file
-            log.write(f"{elapsed_time():.3f}: {data}\n")
+            log.write(f"{display_time():.3f}: {data}\n")
         if self.live_demo:
             await self.socket.send_all(data)
             ack = b""
@@ -435,21 +442,51 @@ class DroneHandler:
                 ack = await self.socket.receive_some()
                 await sleep(0.01)
             with open(self.log, 'a') as log:
-                log.write(f"{elapsed_time():.3f}: {ack}\n")
+                log.write(f"{display_time():.3f}: {ack}\n")
+
+    async def _emergency_calculate(self, arg: Any):
+        print(f"[{display_time():.3f}] {self.drone_ID}: Got emergency calculate command. Trajectory should start in {self.calc_time} sec")
+        # grab the coordinates of the nodes in the graph currently
+        vertices = np.array([graph['graph'].nodes.data('pos')[node_idx] for node_idx in graph['graph'].nodes])
+        # this is the time at which the *NEW* emergency trajectory will start
+        start_time = math.ceil((current_time() + self.calc_time) * 10) / 10
+        # add the position of the drone at time start_time to the graph so we can calculate a trajectory from it
+        extended_graph, new_start_idx = expand_graph(graph, vertices, self.drone, start_time, static_obstacles)
+        origin_vertex = self.drone.start_vertex # save the previous start vertex
+        self.drone.emergency = True  # signal to gurobi that drone will be moving at the start of the trajectory
+        self.drone.start_vertex = new_start_idx
+        self.drone.start_time = start_time
+        self._start_deadline = start_time
+        other_drones = [drone for drone in drones if drone.cf_id != self.drone_ID]
+        spline_path, speed_profile, duration, length = generate_trajectory(drone=self.drone, G={'graph': extended_graph,
+                                                                                               'point_cloud': graph['point_cloud']},
+                                                                           dynamic_obstacles=dynamic_obstacles,
+                                                                           other_drones=other_drones,
+                                                                           Ts=scene.Ts,
+                                                                           safety_distance=scene.general_safety_distance)
+        self.drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
+        # self.drone.flight_time = self.drone.trajectory['speed_profile'][0][-1]
+        self.drone.emergency = False
+        self.drone.fligth_time = duration
+        self.drone.start_vertex = origin_vertex  # reset the previous start vertex
+        add_coll_matrix_to_elipsoids([self.drone], graph, scene.Ts, scene.cmin, scene.cmax,
+                                     scene.general_safety_distance)
+        traj_json = splines_to_json(spline_path, speed_profile, self.drone_ID, self.traj_id)
+        self.traj_id += 1
+        await self.enqueue_command("upload", traj_json)  # calculations are always followed by an upload
 
     async def _calculate(self, last: bool):
-        print(f"[{elapsed_time():.3f}] {self.drone_ID}: Got calculate command. Trajectory should start in {self.drone.rest_time} sec")
+        print(f"[{display_time():.3f}] {self.drone_ID}: Got calculate command. Trajectory should start in {self.drone.rest_time} sec")
         choose_target(scene, self.drone, last)  # last==True will mean that the target chosen will be the home position
-        self.drone.start_time = round(elapsed_time() + self.drone.rest_time, 1) # required for trajectory calculation
+        self.drone.start_time = round(current_time() + self.drone.rest_time, 1) # required for trajectory calculation
         self._start_deadline = current_time() + self.drone.rest_time  # deadline for starting the trajectory
         other_drones = [drone for drone in drones if drone.cf_id != self.drone_ID]
         # print(f"{self.drone_ID}: other drones are {[drone.cf_id for drone in other_drones]}")
         spline_path, speed_profile, duration, length = generate_trajectory(drone=self.drone, G=graph,
-                                                                           dynamic_obstacles=[],
+                                                                           dynamic_obstacles=dynamic_obstacles,
                                                                            other_drones=other_drones,
                                                                            Ts=scene.Ts,
                                                                            safety_distance=scene.general_safety_distance)
-
         self.drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
         # self.drone.flight_time = self.drone.trajectory['speed_profile'][0][-1]
         self.drone.fligth_time = duration
@@ -463,7 +500,7 @@ class DroneHandler:
 
     async def _takeoff(self, arg):
         height = float(arg)
-        print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Taking off to {height}")
+        print(f"[{display_time():.3f} s] {self.drone_ID}: Taking off to {height}")
         await self.send_and_ack(f"CMDSTART_takeoff_{height:.4f}_EOF".encode())
         await sleep(TAKEOFF_TIME)  # while the takeoff is under way, block the handler
 
@@ -477,7 +514,7 @@ class DroneHandler:
 
     async def _land(self, arg):
         assert arg is None
-        print(f"[{elapsed_time():.3f} s] {self.drone_ID}:Landing")
+        print(f"[{display_time():.3f} s] {self.drone_ID}:Landing")
         await self.send_and_ack(f"CMDSTART_land_EOF".encode())
         await sleep(TAKEOFF_TIME)  # landing should take about as long as taking off
         self.on_ground = True
@@ -486,14 +523,15 @@ class DroneHandler:
         if str(arg).lower() in ["relative", "rel", "absolute", "abs"]:  # trajectory may be absolute or relative
             # self.drone.flight_time could be read from self.traj as well
             await self.send_and_ack(f"CMDSTART_start_{arg}_EOF".encode())
-            print(f"[{elapsed_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.fligth_time}")
+            print(f"[{display_time():.3f} s] {self.drone_ID}: Beginning trajectory lasting {self.drone.fligth_time}")
             # await sleep(self.drone.fligth_time)  # while the drone is traversing the trajectory, wait
             recvd_interrupt = await self.interruptable_sleep(self.drone.fligth_time)
-            if not recvd_interrupt:
-                if self.landing:  # self.landing signals that we don't need any more trajectories
-                    await self.enqueue_command("land", None)
-                else:  # if elapsed time is more than demo time, that means we should calculate the return to home
-                    await self.enqueue_command("calculate", elapsed_time() > demo_time)
+            if recvd_interrupt:
+                return
+            if self.landing:  # self.landing signals that we don't need any more trajectories
+                await self.enqueue_command("land", None)
+            else:  # if elapsed time is more than demo time, that means we should calculate the return to home
+                await self.enqueue_command("calculate", display_time() > demo_time)
         else:
             print(f"Invalid trajectory type (not absolute or relative)")
 
@@ -511,12 +549,12 @@ class DroneHandler:
             # await sleep(0.001)
 
 
-def elapsed_time():
+def display_time():
     """returns the time since it was first called, in order to make time.time() more usable, since time.time() is
     a big number"""
-    if not hasattr(elapsed_time, 'start_time'):
-        elapsed_time.start_time = current_time()
-    return current_time() - elapsed_time.start_time
+    if not hasattr(display_time, 'start_time'):
+        display_time.start_time = current_time()
+    return current_time() - display_time.start_time
 
 
 class RateLimiter:
@@ -525,16 +563,16 @@ class RateLimiter:
     def __init__(self, rate: float):
         self.rate = rate
         self.interval = 1 / rate
-        self.last_call_timestamp = elapsed_time()
+        self.last_call_timestamp = display_time()
 
     async def limit(self):
-        current_time = elapsed_time()
+        current_time = display_time()
         time_since_last_call = current_time - self.last_call_timestamp
         if time_since_last_call < self.interval:
             # print(f"limiting rate")
             delay = self.interval - time_since_last_call
             await trio.sleep(delay)
-        self.last_call_timestamp = elapsed_time()
+        self.last_call_timestamp = display_time()
 
 
 async def establish_connection_with_handler(drone_id: str):
@@ -551,28 +589,67 @@ async def establish_connection_with_handler(drone_id: str):
         return None
 
 async def tcp_handler(stream: trio.SocketStream, handlers: Dict[str, DroneHandler]):
+    global dynamic_obstacles
+    start_time = display_time.start_time + 12
     print(f"TCP connection to car handler made.")
-    while True:
-        try:
-            data: bytes = await stream.receive_some()
-            if not data:
-                break
-            id = "0"+data.decode("utf-8") if len(data) == 1 else data.decode("utf-8")
-            if id not in handlers:
-                print(f"Incorrect ID. Valid IDs are {handlers.keys()}")
-            else:
-                handler = handlers[id]
-                await handler.clear_queue()
-                await handler.enqueue_command("calculate", elapsed_time() > demo_time)
-                handler.interrupt.set()
-        except Exception as exc:
-            print(f"TCP connection to car handler crashed with exception: {exc!r}")
+    safety_distance = 0.7
+    try:
+        # data may get transmitted in several packages, so keep reading until we find end of file
+        data: bytes = b""
+        while not data.endswith(b"EOF"):
+            data += await stream.receive_some()
+        data = data[:-len(b"EOF")]
+        # un-serialize the Dynamic_obstacle TODO: don't transmit the whole thing, instead initialize it here
+        dummy_drone: Dynamic_obstacle = pickle.loads(data)
+        dummy_drone.start_time = current_time()
+        # dummy_drone.start_time = start_time
+        # await sleep_until(start_time)
+        add_coll_matrix_to_poles(obstacles=[dummy_drone], graph_dict=graph, Ts=scene.Ts, cmin=scene.cmin,
+                                 cmax=scene.cmax, safety_distance=safety_distance)
+        dynamic_obstacles = [dummy_drone]
+        drones = [handlers[key].drone for key in handlers.keys()]
+        collision_ids = check_collisions_with_dummy_drone(new_obstacle=dummy_drone, drones=drones,
+                                                Ts=scene.Ts, safety_distance=safety_distance)
+        if len(collision_ids) > 0:
+            print_WARNING(f"Collisions detected with the following drone(s): {collision_ids}")
+        for id in collision_ids:
+            handler = handlers[id]
+            handler.interrupt.set()
+            await handler.clear_queue()
+            await handler.enqueue_command("emergency_calculate", dummy_drone)
 
-
+    except Exception as exc:
+        print(f"TCP connection to car handler crashed with exception: {exc!r}")
+    print(f"Closing TCP connection")
 
 async def demo():
     print("Welcome to Palkovits Máté's drone demo!")
-    await sleep(1)
+    demo_start_deadline = current_time() + TAKEOFF_TIME + REST_TIME  # this is when we start the first trajectories
+    for i, drone_ID in enumerate(drone_IDs):
+        # let's calculate the first trajectories, since they should be handled differently from the rest
+        drone = Drone()
+        drone.rest_time = REST_TIME
+        drone.cf_id = drone_ID
+        # It could be possible, for example, that the home position associated witht he index home_positions[i] is actually
+        # not the position where the drone in question is. The function below calculates which home position is the closest.
+        drone.start_vertex = determine_home_position(drone_ID)
+        drone.target_vetrex = np.random.choice(scene.free_targets)
+        # bar the other drones from selecting the node we're going to. i.e. delete the target vertex from the free vertices
+        scene.free_targets = np.delete(scene.free_targets, scene.free_targets == drone.target_vetrex)
+        # the function below works correctly if the trajectory and flight_time of the other_drones is set correctly. It
+        # returns the xyz(distance_travelled), distance_travelled(time), as well as the full duration and length
+        drone.start_time = demo_start_deadline
+        spline_path, speed_profile, duration, length = generate_trajectory(drone=drone, G=graph,
+                                                                           dynamic_obstacles=dynamic_obstacles,
+                                                                           other_drones=drones, Ts=scene.Ts,
+                                                                           safety_distance=scene.general_safety_distance)
+        drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
+        drone.fligth_time = duration
+        add_coll_matrix_to_elipsoids([drone], graph, scene.Ts, scene.cmin, scene.cmax,
+                                     scene.general_safety_distance)
+        drones.append(
+            drone)  # for the next drone, this current drone will count as part of 'other_drones': avoid collision
+
     # we will have a handler process for each drone, which are completely independent. For ease of access, we will put
     # them into a dictionary to look up a handler by its associated cf ID, however, we will also save the ID in the
     # handler itself.
@@ -591,18 +668,16 @@ async def demo():
         for ID, handler in handlers.items():
             # each handler will continuously scan its queue for commands to be handled
             nursery.start_soon(handler.continuously_pop_que)
-        demo_start_deadline = current_time() + TAKEOFF_TIME + REST_TIME # this is when we start the first trajectories
-        elapsed_time.start_time = current_time()  # reset elapsed_time to 0
+        display_time.start_time = current_time()  # reset display time to 0
         for i, drone_ID in enumerate(drone_IDs):
             drone = [d for d in drones if d.cf_id == drone_ID][0]
             traj_json = splines_to_json(drone.trajectory['spline_path'], drone.trajectory['speed_profile'], drone_ID, 0)
             # figure out what height the trajectories start at for each drone, for accurate takeoff
-            takeoff_height = spline_path[1][2][0]
+            takeoff_height = drone.trajectory['spline_path'][1][2][0]
             handlers[drone_ID].drone = drone  # connect the handler with the Drone() object
             handlers[drone_ID]._start_deadline = demo_start_deadline  # set the drone to start after the hover period
             await handlers[drone_ID].enqueue_command("takeoff", takeoff_height)
             await handlers[drone_ID].enqueue_command("upload", traj_json)
-        await sleep(TAKEOFF_TIME + REST_TIME)
         print(f"READY FOR CAR PORT!")
         with trio.move_on_after(demo_time + TAKEOFF_TIME + REST_TIME):
             await trio.serve_tcp(partial(tcp_handler, handlers=handlers), CAR_PORT)
@@ -611,7 +686,7 @@ async def demo():
 # This list has to be set manually to the drones we want to fly. This is inconvenient, but that's the point: it forces
 # us to manually double check if we are using the correct drones.
 # drone_IDs = ["04", "06", "07", "08"]
-drone_IDs = ["04", "06"]
+drone_IDs = ["04", "08"]
 verify_drones(drone_IDs)  # throw an error if the drones in frame are not exactly the drones we set above
 
 # create the folders where we will store trajectory json files (for backup, logging and skyc generation)
@@ -631,20 +706,25 @@ if os.path.exists(log_folder_path):
     shutil.rmtree(log_folder_path)
 os.makedirs(log_folder_path)
 
-np.random.seed(100)
-number_of_targets, graph = construction()
+rand_seed = np.random.randint(low=0, high=2000000000, size=1)[0]
+print(f"random seed: {rand_seed}")
+np.random.seed(rand_seed)
+
+# Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
+LIVE_DEMO = True
+print_WARNING(f"DEMO IS {'LIVE' if LIVE_DEMO else 'NOT LIVE'}")
+
+number_of_targets, graph, static_obstacles = construction(drone_IDs)
 scene = Construction()
-demo_time = 40  # sec
+demo_time = 25 # sec
 
 # SETUP DRONES
 target_zero = len(graph['graph'].nodes()) - number_of_targets
 target_list = np.arange(target_zero, len(graph['graph'].nodes()), 1)
 scene.free_targets = target_list
-
+dynamic_obstacles = []
 
 NUM_OF_DRONES = len(drone_IDs)
-# Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
-LIVE_DEMO = True
 REST_TIME = 3  # This is how much drones will hover between trajectories. Calculations are run during these rests.
 # This is NOT how long it takes to perform takeoff. That is determined by the server and the firmware. This is how much
 # we wait after dispatching the takeoff command, before continuing. Set this to a common sense value that will obviously
@@ -666,28 +746,6 @@ traj_type = "absolute"
 scene.home_positions = scene.free_targets[-NUM_OF_DRONES:]  # the home positions are appended to the end of the nodes
 scene.free_targets = scene.free_targets[:-NUM_OF_DRONES]  # let's not fly to the home positions, only the 'normal' nodes
 drones: List[Drone] = []
-
-for i, drone_ID in enumerate(drone_IDs):
-    # let's calculate the first trajectories, since they should be handled differently from the rest
-    drone = Drone()
-    drone.rest_time = REST_TIME
-    drone.cf_id = drone_ID
-    # It could be possible, for example, that the home position associated witht he index home_positions[i] is actually
-    # not the position where the drone in question is. The function below calculates which home position is the closest.
-    drone.start_vertex = determine_home_position(drone_ID)
-    drone.target_vetrex = np.random.choice(scene.free_targets)
-    # bar the other drones from selecting the node we're going to. i.e. delete the target vertex from the free vertices
-    scene.free_targets = np.delete(scene.free_targets, scene.free_targets == drone.target_vetrex)
-    # the function below works correctly if the trajectory and flight_time of the other_drones is set correctly. It
-    # returns the xyz(distance_travelled), distance_travelled(time), as well as the full duration and length
-    spline_path, speed_profile, duration, length = generate_trajectory(drone=drone, G=graph, dynamic_obstacles=[],
-                                                                       other_drones=drones, Ts=scene.Ts,
-                                                                       safety_distance=scene.general_safety_distance)
-    drone.trajectory = {'spline_path': spline_path, 'speed_profile': speed_profile}
-    drone.fligth_time = duration
-    add_coll_matrix_to_elipsoids([drone], graph, scene.Ts, scene.cmin, scene.cmax,
-                                 scene.general_safety_distance)
-    drones.append(drone)  # for the next drone, this current drone will count as part of 'other_drones': avoid collision
 
 trio.run(demo)
 

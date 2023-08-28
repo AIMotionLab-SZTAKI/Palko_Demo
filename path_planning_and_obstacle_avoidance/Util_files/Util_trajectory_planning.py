@@ -1,11 +1,14 @@
 from queue import PriorityQueue
-from typing import Tuple
+from typing import Tuple, List
+
+import matplotlib.pyplot as plt
 import networkx as nx
 import copy
 from gurobipy import *
 
 from path_planning_and_obstacle_avoidance.Util_files.Util_general import *
 from path_planning_and_obstacle_avoidance.Util_files.Util_constuction import intersect
+from path_planning_and_obstacle_avoidance.Util_files.Util_visualization import plot_trajectoty
 from path_planning_and_obstacle_avoidance.Classes import Drone, Dynamic_obstacle
 
 
@@ -136,7 +139,7 @@ def summ_collision_matrices(other_drones: list, time_min: float, time_max: float
     for other_drone in other_drones:
         added_coll_matrix = other_drone.collision_matrix_compressed[1:, 1:]
         later_times = round((time_max - other_drone.collision_matrix_compressed[-1][0])/Ts)
-        if later_times: # When the obstacles finnises its movement
+        if later_times: # When the obstacles finises its movement
             one_M = np.ones((later_times, np.shape(other_drones[0].collision_matrix_compressed)[1] - 1))
             coll_matrix_at_end = other_drone.collision_matrix_compressed[-1][1:] * one_M
             added_coll_matrix = np.row_stack((added_coll_matrix, coll_matrix_at_end))
@@ -329,8 +332,16 @@ def optimize_speed_profile(drone: Drone, other_drones: list, dynamic_obstacles: 
     flight_time_multiplier = np.array([2, 4, 8, 16])
 
     time_windows = flight_time_multiplier * (length / speed)
+    safety_time_window = 0
     for other_drone in other_drones:
-        time_windows = time_windows[time_windows > other_drone.fligth_time]
+        # The speed profile optimization has to consider the whole flight time of the other drones
+        time_windows = time_windows[time_windows > (other_drone.fligth_time+other_drone.start_time-drone.start_time)]
+        if other_drone.fligth_time > safety_time_window:
+            safety_time_window = other_drone.fligth_time
+
+    # If the maximum flight time is less than max(other_drone.fligth_time) then use the largest flight time
+    if len(time_windows) == 0:
+        time_windows = [safety_time_window]
 
     sgrid = np.linspace(0, length, math.ceil(length / (0.25 * drone.radius)))
     drone_pos = np.transpose(interpolate.splev(sgrid, spline_path))
@@ -344,8 +355,6 @@ def optimize_speed_profile(drone: Drone, other_drones: list, dynamic_obstacles: 
                                                       safety_distance, table, collision_counter)
         table, collision_counter = fill_table_elipsoids(other_drones, drone_pos, tgrid, sgrid, drone.radius,
                                                         drone.DOWNWASH, safety_distance, table, collision_counter)
-        # TODO: poles
-
         opt_mod = run_gurobi(drone, collision_counter, table, H, Ts, length, tgrid, speed)
 
         try:
@@ -362,7 +371,7 @@ def optimize_speed_profile(drone: Drone, other_drones: list, dynamic_obstacles: 
     if len(tgrid) != len(s_result):
         tgrid = np.append(tgrid, tgrid[-1] + Ts)
 
-    s_result, tgrid = trim_trajectory(s_result, tgrid)
+    s_result, tgrid = trim_trajectory(s_result, tgrid) #TODO: after trim len() > k must hold
     speed_profile = interpolate.splrep(tgrid, s_result, k=5)
     flight_time = tgrid[-1]-drone.start_time
 
@@ -466,9 +475,13 @@ def run_gurobi(drone: Drone, collision_counter: int, table: np.ndarray, H: int, 
     J_p = 5
     J_v = 1
 
+    if drone.emergency:
+        v_start = np.linalg.norm( drone.move(np.array(drone.start_time)) - drone.move(np.array(drone.start_time+0.001))  )/0.001
+    else:
+        v_start = 0
     opt_mod.addConstr(s[0] == 0.00001)  # not 0 to negate the invincible start point effect
     opt_mod.addConstr(s[len(s) - 1] == length - 0.00001)
-    opt_mod.addConstr(v[0] == 0)
+    opt_mod.addConstr(v[0] == v_start)
     opt_mod.addConstr(v[len(v) - 1] == 0)
     opt_mod.addConstrs(v[k + 1] == v[k] + a[k] * Ts
                        for k in range(H))
@@ -488,14 +501,16 @@ def run_gurobi(drone: Drone, collision_counter: int, table: np.ndarray, H: int, 
     opt_mod.addConstrs(s[k] + bigM * cost_binary[k] >= length - 0.001
                        for k in range(H + 1))
 
-    tgrid_H = np.append(tgrid, H)-drone.start_time
+    tgrid_H = np.append(tgrid, tgrid[-1]+Ts)-drone.start_time
     s_opt = [min(speed * t, length) for t in tgrid_H]
     difference_in_position = [(s[x] - s_opt[x]) for x in range(len(s))]
     difference_in_position = np.array(difference_in_position)
     difference_in_position = difference_in_position.dot(np.transpose(difference_in_position))
+
     difference_in_speed = [(v[x] - speed) for x in range(len(v))]
     difference_in_speed = np.array(difference_in_speed)
     difference_in_speed = difference_in_speed.dot(np.transpose(difference_in_speed))
+
     weighted_difference = J_p * difference_in_position + J_v * difference_in_speed
     d_compensation = 0
     for x in range(len(v)):
@@ -532,7 +547,7 @@ def trim_trajectory(s_result: list, tgrid: np.ndarray) -> Tuple[list, np.ndarray
 
 def choose_target(scene, drone, return_home: bool = False):
     """
-    Assing a new target poin for the given drone.
+    Assing a new target point for the given drone.
 
     :param scene: the free_targets contains those target points which are not start or goal ploints for either of the
                   drones
@@ -574,6 +589,30 @@ def check_collisions_with_new_obstacles(new_obstacle: Dynamic_obstacle, drones: 
         # Select drones for imediate recalculation
         if any(distances <= (drn.radius + new_obstacle.radius + safety_distance)):
             collision_with.append(drn.serial_number)
+
+    return collision_with
+
+
+def check_collisions_with_dummy_drone(new_obstacle: Dynamic_obstacle, drones: List[Drone], Ts: float,
+                                      safety_distance: float ) -> list:
+
+    """
+    new_obstacle.start_time
+    new_obstacle.path_time = duration
+    new_obstacle.radius
+    """
+    collision_with = []
+    obs_positions = new_obstacle.move(np.arange(new_obstacle.start_time,
+                                                new_obstacle.start_time + new_obstacle.path_time + Ts, Ts))[:, :2]
+    for drn in drones:
+        drn_position = drn.move(np.arange(new_obstacle.start_time, drn.start_time + drn.fligth_time + Ts, Ts)
+                                )[:, :2][:len(obs_positions)]
+        obs_positions_crop = obs_positions[:len(drn_position)]
+        distances = np.linalg.norm(drn_position - obs_positions_crop, axis=1)
+
+        # Select drones for imediate recalculation
+        if any(distances <= (drn.radius + new_obstacle.radius + safety_distance)):
+            collision_with.append(drn.cf_id)
 
     return collision_with
 

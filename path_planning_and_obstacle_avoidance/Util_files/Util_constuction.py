@@ -90,7 +90,7 @@ def check_maximum_deviation(obstacles_dict: dict) -> None:
 def add_dimension_to_obstacles(obstacle_measurements: dict, obstacles_side_lengths: dict) -> np.ndarray:
     """
     Since the optitrack measurements only give the top-center coordinates of the static obstacles
-    the width of them has to be set manualy. This function sets the width of the obstacles based on their names.
+    the width of them has to be set manually. This function sets the width of the obstacles based on their names.
 
     The width of the obstacles can be set in Classes/Construction/self.real_obstacles_side_lengths
 

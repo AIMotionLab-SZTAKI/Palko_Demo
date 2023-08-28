@@ -1,14 +1,24 @@
 import cProfile
 import pstats
+from typing import List, Dict
 
 from path_planning_and_obstacle_avoidance.Util_files.Util_constuction import *
 from path_planning_and_obstacle_avoidance.Util_files.Util_visualization import *
 from path_planning_and_obstacle_avoidance.Classes import Construction, Static_obstacles
 
+def get_id(string):
+    '''takes a name as found in optitrack and returns the ID found in it, for example cf6 -> 06'''
+    number_match = re.search(r'\d+', string)
+    if number_match:
+        number = number_match.group(0)
+        if len(number) == 1:
+            number = '0' + number
+        return number
+    return None
 
 # ======================================================================================================================
     # CONSTRUCTION MAIN
-def construction():
+def construction(drone_IDs: List[str]):
     """
     The scene constructor sets up the static obstacles and the paths of the virtual moving obstacles.
     It also generates the searching graphs.
@@ -27,7 +37,10 @@ def construction():
     static_obstacles = Static_obstacles()
 
     if scene.real_obstacles:
-        obstacle_measurements = get_obstacles_positions_from_optitrack(scene.get_new_measurement)
+        obstacle_measurements: Dict[str, np.ndarray] = get_obstacles_positions_from_optitrack(scene.get_new_measurement)
+        extra_cfs = [key for key in obstacle_measurements.keys() if key.startswith("cf") and get_id(key) not in drone_IDs]
+        [obstacle_measurements.pop(cf) for cf in extra_cfs]
+
         static_obstacles.enclosed_space = add_dimension_to_obstacles(obstacle_measurements,
                                                                      scene.real_obstacles_side_lengths)
     else:
@@ -115,7 +128,7 @@ def construction():
         "graph": base_graph,
         "point_cloud": base_point_cloud
     }
-    return len(V_fix), graph
+    return len(V_fix), graph, static_obstacles
 
 
 # ======================================================================================================================
@@ -184,9 +197,9 @@ def select_fix_vertex_set(index_of_verex_set: int) -> np.ndarray:
         outer_xy = 3 * inner_xy
         high_layer = 1.1
 
-        V_fix = [[-inner_xy, -outer_xy, high_layer], [outer_xy, -outer_xy, high_layer], [-outer_xy, inner_xy, high_layer], [inner_xy, -outer_xy, high_layer],
-                 [-inner_xy, outer_xy, high_layer],
-                 [-outer_xy, outer_xy, high_layer], [outer_xy, inner_xy, high_layer], [inner_xy, outer_xy, high_layer], [outer_xy, outer_xy, high_layer]]
+        V_fix = [[-inner_xy, -outer_xy, high_layer], [outer_xy, -outer_xy, high_layer], [inner_xy, -outer_xy, high_layer],
+                 [-inner_xy, outer_xy, high_layer], [-outer_xy, -outer_xy, high_layer],
+                 [-outer_xy, outer_xy, high_layer], [inner_xy, outer_xy, high_layer], [outer_xy, outer_xy, high_layer]]
     elif index_of_verex_set == 3:
         # Shape: X_________________________
         #           03 02 01 00|
