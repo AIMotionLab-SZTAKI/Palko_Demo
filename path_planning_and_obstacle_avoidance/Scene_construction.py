@@ -36,15 +36,26 @@ def construction(drone_IDs: List[str]):
     # PLACE STATIC OBSTACLES
     static_obstacles = Static_obstacles()
 
+    enclosed_space_real = []
     if scene.real_obstacles:
         obstacle_measurements: Dict[str, np.ndarray] = get_obstacles_positions_from_optitrack(scene.get_new_measurement)
         extra_cfs = [key for key in obstacle_measurements.keys() if key.startswith("cf") and get_id(key) not in drone_IDs]
         [obstacle_measurements.pop(cf) for cf in extra_cfs]
 
-        static_obstacles.enclosed_space = add_dimension_to_obstacles(obstacle_measurements,
+        enclosed_space_real = add_dimension_to_obstacles(obstacle_measurements,
                                                                      scene.real_obstacles_side_lengths)
+    enclosed_space_simulated = []
+    if scene.simulated_obstacles:
+        enclosed_space_simulated = select_fix_obstacle_set(scene.static_obstacle_layout)
+
+    if len(enclosed_space_simulated)>0 and len(enclosed_space_real)>0:
+        static_obstacles.enclosed_space = np.row_stack((enclosed_space_real, enclosed_space_simulated))
+    elif len(enclosed_space_real)>0:
+        static_obstacles.enclosed_space = enclosed_space_real
+    elif len(enclosed_space_simulated)>0:
+        static_obstacles.enclosed_space = enclosed_space_simulated
     else:
-        static_obstacles.enclosed_space = select_fix_obstacle_set(scene.static_obstacle_layout)
+        static_obstacles.enclosed_space = np.array([])
 
     static_obstacles.corners = calculate_corners(static_obstacles.enclosed_space)
     static_obstacles.enclosed_space_of_safe_zone = add_safety_zone_to_static_obstacles(static_obstacles.enclosed_space,
@@ -65,14 +76,12 @@ def construction(drone_IDs: List[str]):
                                                     scene.base_vertex_number, scene.base_rand_seed, V_fix)
     base_graph, base_point_cloud = create_point_cloud(base_graph, scene.point_cloud_density)
     solve_target_point_collisions(base_graph, base_point_cloud, len(V_fix), scene.general_safety_distance)
-    print_graph_info(base_graph, base_point_cloud)
     if scene.generate_dense_graph:
         densed_graph = extend_base_graph(scene, static_obstacles, scene.dense_minimal_vertex_distance,
                                          scene.dense_maximal_edge_length, scene.dense_vertex_number,
                                          scene.dense_rand_seed, base_vertices)
         densed_graph, densed_point_cloud = create_point_cloud(densed_graph, scene.point_cloud_density)
         solve_target_point_collisions(densed_graph, densed_point_cloud, len(V_fix), scene.general_safety_distance)
-        print_graph_info(base_graph, base_point_cloud)
     else:
         densed_graph = None
         densed_point_cloud = None
@@ -122,7 +131,6 @@ def construction(drone_IDs: List[str]):
     pickle_save(dir_path+"/Pickle_saves/Construction_saves/static_obstacles.pickle", static_obstacles)
     pickle_save(dir_path+"/Pickle_saves/Construction_saves/paths_of_dynamic_obstacles.pickle", paths_points)
     pickle_save(dir_path+"/Pickle_saves/Construction_saves/dynamic_obstacles.pickle", dynamic_obstacles)
-    print("ALL SAVED")
     plt.show()
     graph = {
         "graph": base_graph,
@@ -152,6 +160,9 @@ def select_fix_obstacle_set(index_of_obstacle_set: int) -> np.ndarray:
     elif index_of_obstacle_set == 2:
         obstacle_positions = np.array([[0, 0, 1], [0.5, 0.5, 2]])
         obstacle_dimensions = np.array([[0.75, 0.2], [0.5, 0.5]])/2
+    elif index_of_obstacle_set == 3:
+        obstacle_positions = np.array([[-0.75, -1.2, 2],[0, -1.2, 2], [-0.75, 1.2, 2], [0, 1.2, 2]])
+        obstacle_dimensions = np.array([[0.01, 1]])/2
     else:
         return np.array([])
 
@@ -197,9 +208,9 @@ def select_fix_vertex_set(index_of_verex_set: int) -> np.ndarray:
         outer_xy = 3 * inner_xy
         high_layer = 1.1
 
-        V_fix = [[-inner_xy, -outer_xy, high_layer], [outer_xy, -outer_xy, high_layer], [inner_xy, -outer_xy, high_layer],
+        V_fix = [[-inner_xy, -outer_xy, high_layer],  [inner_xy, -outer_xy, high_layer],
                  [-inner_xy, outer_xy, high_layer], [-outer_xy, -outer_xy, high_layer],
-                 [-outer_xy, outer_xy, high_layer], [inner_xy, outer_xy, high_layer], [outer_xy, outer_xy, high_layer]]
+                 [-outer_xy, outer_xy, high_layer], [inner_xy, outer_xy, high_layer]]
     elif index_of_verex_set == 3:
         # Shape: X_________________________
         #           03 02 01 00|

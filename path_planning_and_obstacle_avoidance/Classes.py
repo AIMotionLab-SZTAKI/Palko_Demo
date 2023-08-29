@@ -18,13 +18,15 @@ class Construction:
         #...............................................................................................................
         # STATIC OBSTACLE RELATED PARAMETERS:
 
-        # If true then use the optritrack measurements, otherwise use a simulated layout.
+        # Select which type of static obstacles will be present
+        # (real obstacles from measurement, priori given simulated obstacles or both).
         self.real_obstacles = True
+        self.simulated_obstacles = True
         # If true then the position of the obstacles are measured, otherwise use a saved layout.
         self.get_new_measurement = True
         # Select one of the predefined simulated layouts. (0 or not defined layout number results in an empty space)
         # More layouts can be defined in the Scene_constuction.py.
-        self.static_obstacle_layout = 0
+        self.static_obstacle_layout = 3
         # The side lengths of the real obstacles can not be measured by the Optitrack, so they have to be given manualy.
         # Do not change the names, just the values. TODO: Makse a guide to how to add more real obstacle types.
         self.real_obstacles_side_lengths = {"buildings": 0.3,

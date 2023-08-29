@@ -53,7 +53,7 @@ def get_measurement(sample_size: int) -> dict:
                                                        positions -> list of measured coordinates of the top center of
                                                                     the obstacles np.array([[x,y,z]...[x,y,z]])
     """
-    mc = motioncapture.MotionCaptureOptitrack("192.168.1.142")
+    mc = motioncapture.MotionCaptureOptitrack("192.168.1.21")
     obstacles_dict = {}
     for _ in range(sample_size):
         mc.waitForNextFrame()
@@ -668,27 +668,6 @@ def solve_target_point_collisions(graph: nx.Graph, point_cloud: np.ndarray, numb
     for edge in graph.edges.data():
         touching_targets = np.unique(np.where(dist_m[:, edge[2]['point_range'][0]:edge[2]['point_range'][1]] <= 1)[0])
         edge[2]['touching_targets'] = touching_targets + (len(graph.nodes())-number_of_targets)
-
-
-def print_graph_info(graph: nx.Graph, point_cloud: np.ndarray) -> None:
-    """
-    Print usefull data about the graph and its point cloud.
-
-    :param graph: nx.Graph object
-    :param point_cloud: array([[x,y,z]...[x,y,z]]) -> collection of points which represents the edges of the graph
-    :return: None
-    """
-    print("Number of points:", len(point_cloud))
-    print("Number of vertices:", len(graph.nodes))
-    print("Nuber of edges:", len(graph.edges))
-    sum_L = 0
-    max_L = 0
-    for edge in graph.edges.data():
-        sum_L = sum_L + edge[2]['weight']
-        if max_L < edge[2]['weight']:
-            max_L = edge[2]['weight']
-    print("Average edge length:", sum_L/len(graph.edges), "m")
-    print("Longest edge is: ", max_L, "m")
 
 
 #=======================================================================================================================

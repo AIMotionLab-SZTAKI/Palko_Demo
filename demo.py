@@ -305,7 +305,7 @@ def determine_id(string):
 
 
 def determine_home_position(drone_ID: str):
-    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.142")
+    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.21")
     mocap.waitForNextFrame()
     items = mocap.rigidBodies.items()
     # let's put the rigid bodies containing cf index into a dictionary with their IDs.
@@ -335,7 +335,7 @@ def determine_home_position(drone_ID: str):
 
 def verify_drones(drone_IDs: List[str]):
     '''Function that asserts we have exactly the drones that we want in frame.'''
-    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.142")
+    mocap = motioncapture.MotionCaptureOptitrack("192.168.1.21")
     mocap.waitForNextFrame()
     items = mocap.rigidBodies.items()
     # drones = [(determine_id(name), list(obj.position[:-1])) for name, obj in items if 'cf' in name]
@@ -711,7 +711,7 @@ print(f"random seed: {rand_seed}")
 np.random.seed(rand_seed)
 
 # Set this to true if we want to dispatch the commands we calculate. A Skyc file will be generated regardless
-LIVE_DEMO = True
+LIVE_DEMO = False
 print_WARNING(f"DEMO IS {'LIVE' if LIVE_DEMO else 'NOT LIVE'}")
 
 number_of_targets, graph, static_obstacles = construction(drone_IDs)

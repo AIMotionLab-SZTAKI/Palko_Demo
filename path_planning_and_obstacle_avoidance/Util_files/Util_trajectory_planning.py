@@ -371,7 +371,7 @@ def optimize_speed_profile(drone: Drone, other_drones: list, dynamic_obstacles: 
     if len(tgrid) != len(s_result):
         tgrid = np.append(tgrid, tgrid[-1] + Ts)
 
-    s_result, tgrid = trim_trajectory(s_result, tgrid) #TODO: after trim len() > k must hold
+    s_result, tgrid = trim_trajectory(s_result, tgrid)
     speed_profile = interpolate.splrep(tgrid, s_result, k=5)
     flight_time = tgrid[-1]-drone.start_time
 
@@ -477,6 +477,8 @@ def run_gurobi(drone: Drone, collision_counter: int, table: np.ndarray, H: int, 
 
     if drone.emergency:
         v_start = np.linalg.norm( drone.move(np.array(drone.start_time)) - drone.move(np.array(drone.start_time+0.001))  )/0.001
+        if v_start > drone.MAX_SPEED:
+            v_start = drone.MAX_SPEED
     else:
         v_start = 0
     opt_mod.addConstr(s[0] == 0.00001)  # not 0 to negate the invincible start point effect
@@ -540,8 +542,13 @@ def trim_trajectory(s_result: list, tgrid: np.ndarray) -> Tuple[list, np.ndarray
             break
         remove = standing[i]
     if remove:
+        if remove < 6: # for later spline generation m>k must hold
+            remove = 6
         s_result = s_result[:remove]
         tgrid = tgrid[:remove]
+    if len(s_result)<6:
+        print_WARNING(f"Not enough point even with out trimming.\n s_result: {s_result} \n tgrid: {tgrid}")
+
     return s_result, tgrid
 
 
